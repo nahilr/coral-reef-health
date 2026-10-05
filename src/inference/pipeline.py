@@ -51,8 +51,8 @@ class CoralPipeline:
                 sel = class_map == cls
                 overlay[sel] = (0.55 * overlay[sel] + 0.45 * color).astype(np.uint8)
             # Draw bounding boxes with class + confidence labels.
-            fs = max(0.6, min(2.2, width / 700.0))  # font scale relative to image size
-            bt = max(2, int(round(width / 400)))     # box thickness
+            fs = max(0.5, min(1.6, width / 900.0))  # font scale relative to image size
+            bt = max(2, int(round(width / 550)))     # box thickness
             if result.masks is not None and result.boxes is not None:
                 boxes = result.boxes.xyxy.detach().cpu().numpy()
                 classes = result.boxes.cls.detach().cpu().numpy().astype(int)
@@ -68,8 +68,8 @@ class CoralPipeline:
             # Panel with composition percentages and reliability status.
             lines = [f"coverage {coverage*100:.1f}%  conf {mean_conf:.2f}  {decision['status']}"]
             lines += [f"{name}: {proportions[name]*100:.1f}%" for name in BROAD_CLASSES if proportions[name] > 0]
-            panel_w = int(width * 0.38)
-            row_h = int(26 * fs) + 6
+            panel_w = int(width * 0.32)
+            row_h = int(20 * fs) + 5
             panel = np.zeros((len(lines) * row_h + 12, panel_w, 3), dtype=np.uint8)
             for i, line in enumerate(lines):
                 cv2.putText(panel, line, (10, row_h * (i + 1)), cv2.FONT_HERSHEY_SIMPLEX, fs, (255, 255, 255), bt, cv2.LINE_AA)
