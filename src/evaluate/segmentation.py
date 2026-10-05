@@ -45,7 +45,7 @@ def evaluate(model_path: str | Path, manifest: str | Path, raw_classes_path: str
 
 
 def main():
-    p = argparse.ArgumentParser(); p.add_argument("--model", required=True); p.add_argument("--manifest", default="data/processed/coralscapes_yolo/manifest.csv"); p.add_argument("--raw-classes", default="datasets/coralscapes/classes.json"); p.add_argument("--max-images", type=int, default=None); p.add_argument("--out", default="reports/segmentation_metrics.json")
+    p = argparse.ArgumentParser(); p.add_argument("--model", required=True); p.add_argument("--manifest", default="data/processed/coralscapes_yolo/manifest.csv"); p.add_argument("--raw-classes", default="data/processed/coralscapes_yolo/classes.json"); p.add_argument("--max-images", type=int, default=None); p.add_argument("--out", default="reports/segmentation_metrics.json")
     p.add_argument("--conf", type=float, default=0.20,
                    help="Prediction confidence threshold. Use a low value for diagnostic recall analysis.")
     args = p.parse_args(); metrics = evaluate(args.model, args.manifest, args.raw_classes, args.max_images, args.conf); Path(args.out).parent.mkdir(parents=True, exist_ok=True); Path(args.out).write_text(json.dumps(metrics, indent=2)); print(json.dumps(metrics, indent=2))
