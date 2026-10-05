@@ -7,8 +7,7 @@ This repository contains a reproducible image/video workflow for visible benthic
 ```bash
 python -m pip install -r requirements.txt
 python scripts/prepare_dataset.py
-python scripts/train.py --epochs 1 --fraction 0.1 --batch 2
-python scripts/train_condition.py --per-class 250 --epochs 1
+# Trained on Kaggle via kaggle_run/train_kaggle.py (30 epochs on T4)
 python scripts/evaluate.py --model models/checkpoints/yolo26n_seg/weights/best.pt --max-images 20
 python scripts/infer.py --model models/checkpoints/yolo26n_seg/weights/best.pt --image path/to/image.jpg
 streamlit run src/app/streamlit_app.py
@@ -16,7 +15,7 @@ streamlit run src/app/streamlit_app.py
 
 The default preparation uses local Coralscapes images and masks and maps the original 39 classes to seven visible classes: live-looking coral, bleached-looking coral, dead coral, algae, rubble, sand/rock, and other. Raw labels remain in `data/processed/coralscapes_yolo/label_map.json`.
 
-For full training, omit `--fraction 0.1` after the smoke run works. Checkpoints and plots are saved under `models/checkpoints/`; reports go under `reports/` and inference outputs under `outputs/`. The default preparation uses local symlinks for speed; use `python scripts/prepare_dataset.py --copy-images` when moving the processed dataset to Colab/Drive. Copy the complete `models/checkpoints/` directory back before the session ends.
+Checkpoints and plots are saved under `models/checkpoints/`; reports go under `reports/` and inference outputs under `outputs/`. The default preparation uses local symlinks for speed; use `python scripts/prepare_dataset.py --copy-images` when moving the processed dataset to Kaggle/Drive. Training itself is a Kaggle job (`kaggle_run/`), not a local loop.
 
 The evaluator defaults to the conservative operating threshold (`--conf 0.20`). For a diagnostic recall check, run a second report with `--conf 0.001`; keep both reports because a low threshold is not an acceptance policy.
 
