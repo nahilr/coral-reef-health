@@ -80,12 +80,14 @@ Every command-line workflow is funneled through `main.py`:
 python main.py prepare [--root DATASETS_HF] [--out PROCESSED] [--max-images-per-split N] [--copy-images]
 python main.py evaluate --model CKPT [--manifest ...] [--raw-classes ...] [--max-images N] [--conf ...] [--out ...]
 python main.py infer --model CKPT [--image IMG | --video VID] [--out DIR] [--imgsz 512] [--conf ...]
+python main.py train-condition [--manifest ...] [--raw-classes ...] [--crops ...] [--checkpoint ...] [--per-class N] [--epochs N] [--batch N]
 python main.py app [--port 8501]
 ```
 
 - `prepare` calls `src/data/prepare.py:prepare()` — converts the local HF Coralscapes snapshot into the YOLO segmentation dataset (manifest.csv, data.yaml, label_map.json, classes.json, YOLO polygon labels).
 - `evaluate` calls `src/evaluate/segmentation.py:evaluate()` — per-class IoU, mIoU, confusion matrix.
 - `infer` calls `src/inference/pipeline.py:CoralPipeline` for image or video, writes overlay + JSON report.
+- `train-condition` calls `src/models/train_condition.py:make_crops()` + `train_condition()` — crop extraction + ResNet18 training; condition classifier checkpoint exists at `models/checkpoints/condition_resnet18.pt`.
 - `app` launches `src/app/streamlit_app.py` as a Streamlit sub-process.
 
 Training itself no longer runs in a local script; it is the Kaggle kernel defined in `kaggle_run/`. Nothing under `scripts/` remains.
@@ -130,9 +132,15 @@ kaggle kernels output nahilr/coral-btp-train -p kaggle_out_v2
 
 Checkpoint: `models/checkpoints/condition_resnet18.pt` (ResNet18 trained on crops
 sampled from the Coralscapes masks — live/bleached/dead coral, up to 250 crops per
-class). The crop-extraction + training code path was local and is no longer part of
-the working tree; the checkpoint is kept as a standalone artifact for any future
-re-training.
+class).
+
+Retraining is available via the local entrypoint:
+```bash
+python main.py train-condition [--manifest ...] [--raw-classes ...] [--crops ...] [--checkpoint ...] [--per-class N] [--epochs N] [--batch N]
+```
+which calls `src/models/train_condition.py:make_crops()` (crop extraction from
+segmentation masks) followed by `train_condition()` (ResNet18 training). The
+code lives in `src/models/train_condition.py`.
 
 ## Evaluation
 

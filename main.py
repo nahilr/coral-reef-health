@@ -2,10 +2,11 @@
 """Single entry point for the coral-reef trust pipeline.
 
 Subcommands:
-  prepare   prepare the YOLO seg dataset from the local HF snapshot
-  evaluate  evaluate a segmentation checkpoint on the held-out test split
-  infer     run image inference for a single file or video
-  app       launch the Streamlit UI
+  prepare          prepare the YOLO seg dataset from the local HF snapshot
+  evaluate         evaluate a segmentation checkpoint on the held-out test split
+  infer            run image inference for a single file or video
+  train-condition  extract coral crops and train the condition classifier
+  app              launch the Streamlit UI
 """
 from __future__ import annotations
 
@@ -49,6 +50,15 @@ def main() -> None:
     app = sub.add_parser("app", help="start the Streamlit UI")
     app.add_argument("--port", type=int, default=8501)
 
+    tc = sub.add_parser("train-condition", help="extract coral crops and train condition classifier")
+    tc.add_argument("--manifest", default="data/processed/coralscapes_yolo/manifest.csv")
+    tc.add_argument("--raw-classes", default="data/processed/coralscapes_yolo/classes.json")
+    tc.add_argument("--crops", default="data/processed/condition_crops")
+    tc.add_argument("--checkpoint", default="models/checkpoints/condition_resnet18.pt")
+    tc.add_argument("--per-class", type=int, default=250)
+    tc.add_argument("--epochs", type=int, default=1)
+    tc.add_argument("--batch", type=int, default=32)
+
     args = p.parse_args()
 
     if args.cmd == "prepare":
@@ -72,6 +82,11 @@ def main() -> None:
     elif args.cmd == "app":
         cmd = [sys.executable, "-m", "streamlit", "run", "src/app/streamlit_app.py", "--server.port", str(args.port)]
         subprocess.run(cmd, check=True)
+    elif args.cmd == "train-condition":
+        from src.models.train_condition import make_crops, train_condition
+        counts = make_crops(Path(args.manifest), Path(args.raw_classes), Path(args.crops), args.per_class)
+        metrics = train_condition(Path(args.crops), Path(args.checkpoint), args.epochs, args.batch)
+        print(json.dumps({"crop_counts": counts, "metrics": metrics, "checkpoint": args.checkpoint}, indent=2))
 
 
 
