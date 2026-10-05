@@ -1,0 +1,97 @@
+{
+  "project": "Trustworthy AI-Assisted Coral Reef Health Assessment",
+  "dataset": {
+    "name": "Coralscapes",
+    "prepared_manifest": "data/processed/coralscapes_yolo/manifest.csv",
+    "images": 2075,
+    "by_split": {
+      "train": 1517,
+      "test": 392,
+      "val": 166
+    },
+    "classes": "configs/labels.yaml"
+  },
+  "segmentation": {
+    "architecture": "Ultralytics YOLO26n-seg",
+    "checkpoint": "models/checkpoints/yolo26n_seg/weights/best.pt",
+    "trainer": "Kaggle T4",
+    "epochs": 30,
+    "imgsz": 512,
+    "batch": 16,
+    "device": "T4 x2",
+    "operating_confidence": 0.2,
+    "metrics_mAP50_mask": 0.1652
+  },
+  "condition_classifier": {
+    "architecture": "torchvision ResNet18",
+    "checkpoint": "models/checkpoints/condition_resnet18.pt",
+    "classes": [
+      "coral_alive",
+      "coral_bleached",
+      "coral_dead"
+    ],
+    "metrics": {
+      "classes": [
+        "coral_alive",
+        "coral_bleached",
+        "coral_dead"
+      ],
+      "train_images": 450,
+      "val_images": 382,
+      "macro_f1": 0.22637597958811737,
+      "balanced_accuracy": 0.3373441734417344,
+      "classification_report": {
+        "coral_alive": {
+          "precision": 0.40173410404624277,
+          "recall": 0.9266666666666666,
+          "f1-score": 0.5604838709677419,
+          "support": 150.0
+        },
+        "coral_bleached": {
+          "precision": 0.19444444444444445,
+          "recall": 0.08536585365853659,
+          "f1-score": 0.11864406779661017,
+          "support": 82.0
+        },
+        "coral_dead": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1-score": 0.0,
+          "support": 150.0
+        },
+        "accuracy": 0.38219895287958117,
+        "macro avg": {
+          "precision": 0.19872618283022905,
+          "recall": 0.3373441734417344,
+          "f1-score": 0.22637597958811737,
+          "support": 382.0
+        },
+        "weighted avg": {
+          "precision": 0.19948837709785566,
+          "recall": 0.38219895287958117,
+          "f1-score": 0.2455533879698516,
+          "support": 382.0
+        }
+      }
+    }
+  },
+  "environment": {
+    "python": "3.14.7",
+    "torch": "2.14.1+cu130",
+    "torchvision": "0.29.1+cu130",
+    "ultralytics": "8.4.173",
+    "opencv": "5.0.0",
+    "cuda_available": true,
+    "gpu": "NVIDIA GeForce GTX 1650"
+  },
+  "evaluation_reports": [
+    "reports/segmentation_metrics.json",
+    "reports/segmentation_metrics_diagnostic.json",
+    "reports/segmentation_metrics_full_v2.json"
+  ],
+  "notes": [
+    "Active model trained on Kaggle T4 (nahilr/coral-btp-train v2) on the full Coralscapes dataset for 30 epochs.",
+    "Reliability gate abstains when confidence/coverage/entropy/quality is insufficient.",
+    "Not a deployment claim; needs Lakshadweep validation."
+  ]
+}

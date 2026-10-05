@@ -1,0 +1,11 @@
+classes:
+  - coral_alive
+  - coral_bleached
+  - coral_dead
+  - algae
+  - rubble
+  - sand_rock
+  - other
+ignored_raw_classes:
+  - background
+  - dark
