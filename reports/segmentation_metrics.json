@@ -1,21 +1,21 @@
 {
-  "images": 20,
+  "images": 392,
   "confidence_threshold": 0.2,
-  "mIoU": 0.2964,
+  "mIoU": 0.4038,
   "per_class_iou": {
-    "coral_alive": 0.2147,
-    "coral_bleached": 0.3234,
-    "coral_dead": 0.0869,
-    "algae": 0.0,
-    "rubble": 0.5272,
-    "sand_rock": 0.2172,
-    "other": 0.7051
+    "coral_alive": 0.5181,
+    "coral_bleached": 0.2427,
+    "coral_dead": 0.1269,
+    "algae": 0.3663,
+    "rubble": 0.2657,
+    "sand_rock": 0.7903,
+    "other": 0.5168
   },
   "calibration": {
-    "ece": 0.2079,
-    "mean_confidence": 0.3762,
-    "accuracy": 0.5841,
-    "sample_count": 315,
+    "ece": 0.375,
+    "mean_confidence": 0.3687,
+    "accuracy": 0.7437,
+    "sample_count": 7598,
     "bins": [
       {
         "range": [
@@ -40,138 +40,138 @@
           0.2,
           0.3
         ],
-        "count": 145,
-        "mean_confidence": 0.2436,
-        "accuracy": 0.5172
+        "count": 3606,
+        "mean_confidence": 0.2427,
+        "accuracy": 0.6805
       },
       {
         "range": [
           0.3,
           0.4
         ],
-        "count": 76,
-        "mean_confidence": 0.3423,
-        "accuracy": 0.5658
+        "count": 1560,
+        "mean_confidence": 0.344,
+        "accuracy": 0.7314
       },
       {
         "range": [
           0.4,
           0.5
         ],
-        "count": 32,
-        "mean_confidence": 0.4491,
-        "accuracy": 0.5
+        "count": 918,
+        "mean_confidence": 0.4462,
+        "accuracy": 0.7898
       },
       {
         "range": [
           0.5,
           0.6
         ],
-        "count": 17,
-        "mean_confidence": 0.5461,
-        "accuracy": 0.5882
+        "count": 615,
+        "mean_confidence": 0.5454,
+        "accuracy": 0.8341
       },
       {
         "range": [
           0.6,
           0.7
         ],
-        "count": 15,
-        "mean_confidence": 0.643,
-        "accuracy": 0.8667
+        "count": 431,
+        "mean_confidence": 0.6464,
+        "accuracy": 0.8817
       },
       {
         "range": [
           0.7,
           0.8
         ],
-        "count": 18,
-        "mean_confidence": 0.7553,
-        "accuracy": 0.8889
+        "count": 305,
+        "mean_confidence": 0.7451,
+        "accuracy": 0.9311
       },
       {
         "range": [
           0.8,
           0.9
         ],
-        "count": 10,
-        "mean_confidence": 0.8418,
-        "accuracy": 0.9
+        "count": 140,
+        "mean_confidence": 0.8389,
+        "accuracy": 0.9357
       },
       {
         "range": [
           0.9,
           1.0
         ],
-        "count": 2,
-        "mean_confidence": 0.9335,
+        "count": 23,
+        "mean_confidence": 0.9188,
         "accuracy": 1.0
       }
     ]
   },
   "confusion_matrix": [
     [
-      634204,
-      5596,
-      4612,
-      0,
-      7,
-      0,
-      142983
+      63134469,
+      16635,
+      1350245,
+      2231531,
+      41787,
+      52067,
+      23854034
     ],
     [
-      1078957,
-      752957,
-      389,
-      0,
-      12681,
-      5171,
-      423888
+      4498422,
+      2587080,
+      114468,
+      1183708,
+      17994,
+      43330,
+      1976092
     ],
     [
-      235684,
-      9139,
-      47540,
-      0,
-      7708,
-      44,
-      96962
+      5276087,
+      42024,
+      3460885,
+      2577819,
+      191854,
+      21057,
+      10549557
     ],
     [
-      26787,
-      0,
-      0,
-      0,
-      0,
-      0,
-      133998
+      4204998,
+      57350,
+      1309550,
+      32841454,
+      398174,
+      551533,
+      32467050
     ],
     [
-      81021,
-      62,
-      78802,
-      660,
-      5931639,
-      21416,
-      3546047
+      10756623,
+      3567,
+      751144,
+      5236109,
+      14281394,
+      2181190,
+      12932199
     ],
     [
-      380,
-      98,
-      0,
-      0,
-      1070474,
-      392494,
-      295646
+      265989,
+      303,
+      12041,
+      187418,
+      3054311,
+      60007598,
+      9069581
     ],
     [
-      744313,
-      39264,
-      65964,
-      553973,
-      500155,
-      21355,
-      15694454
+      6167329,
+      118898,
+      1605350,
+      6402200,
+      3910747,
+      483126,
+      117145157
     ]
   ]
 }

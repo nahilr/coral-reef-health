@@ -85,9 +85,7 @@
     "gpu": "NVIDIA GeForce GTX 1650"
   },
   "evaluation_reports": [
-    "reports/segmentation_metrics.json",
-    "reports/segmentation_metrics_diagnostic.json",
-    "reports/segmentation_metrics_full_v2.json"
+    "reports/segmentation_metrics.json"
   ],
   "notes": [
     "Active model trained on Kaggle T4 (nahilr/coral-btp-train v2) on the full Coralscapes dataset for 30 epochs.",

@@ -32,7 +32,7 @@ def main() -> None:
     prep.add_argument("--copy-images", action="store_true")
 
     ev = sub.add_parser("evaluate", help="evaluate segmentation checkpoint")
-    ev.add_argument("--model", required=True)
+    ev.add_argument("--model", default="models/checkpoints/yolo26n_seg/weights/best.pt")
     ev.add_argument("--manifest", default="data/processed/coralscapes_yolo/manifest.csv")
     ev.add_argument("--raw-classes", default="data/processed/coralscapes_yolo/classes.json")
     ev.add_argument("--max-images", type=int, default=None)
@@ -40,7 +40,7 @@ def main() -> None:
     ev.add_argument("--out", default="reports/segmentation_metrics.json")
 
     inf = sub.add_parser("infer", help="image or video inference")
-    inf.add_argument("--model", required=True)
+    inf.add_argument("--model", default="models/checkpoints/yolo26n_seg/weights/best.pt")
     inf.add_argument("--condition-model", default="models/checkpoints/condition_resnet18.pt")
     inf.add_argument("--image")
     inf.add_argument("--video")

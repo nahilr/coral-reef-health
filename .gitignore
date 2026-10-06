@@ -14,6 +14,7 @@ runs/
 
 # Data (too large for git; see project/dataset-inventory.md)
 datasets/
+papers/
 data/
 
 # Inference outputs
@@ -27,10 +28,8 @@ tmp/
 # Agent tooling
 .agents/
 .codex/
-
-# Paper PDFs (large; listed in papers/README.md)
-papers/**/*.pdf
 skills-lock.json
+
 
 # Pretrained base weights (download on demand)
 yolo26n-seg.pt

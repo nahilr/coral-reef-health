@@ -13,6 +13,7 @@ This phase focuses on broad visible benthic and coral-condition indicators from 
 - [Feasibility assessment](btp-feasibility-assessment.md) - schedule, resource assumptions, and completion criteria.
 - [Dataset compatibility](compatible-datasets.md) - dataset roles and usage constraints.
 - [Dataset inventory](dataset-inventory.md) - local availability, contents, annotations, and source links for project datasets.
+- [Paper inventory](paper-inventory.md) - reference papers in use and archived, with canonical web links (PDFs not tracked in git).
 - [Implementation requirements](implementation-requirements.md) - environment, repository layout, and run protocol.
 - [Verified research sources](research-sources.md) - current dataset and technical references.
 

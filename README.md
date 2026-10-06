@@ -8,67 +8,147 @@ Scope: quantitative visible benthic composition and coral-condition indicators w
 
 ## Table of contents
 
-1. [Current artifacts](#current-artifacts)
-2. [Dataset](#dataset)
-3. [Quick start](#quick-start)
-4. [Entry point: `main.py`](#entry-point-mainpy)
-5. [Data preparation](#data-preparation)
-6. [Training (Kaggle Cloud Workflow)](#training-kaggle-cloud-workflow)
-7. [Condition classifier](#condition-classifier)
-8. [Evaluation](#evaluation)
-9. [Inference & reef health pipeline](#inference--reef-health-pipeline)
-10. [Trust / reliability gate](#trust--reliability-gate)
-11. [Overlay and video aggregation](#overlay-and-video-aggregation)
-12. [Streamlit UI](#streamlit-ui)
-13. [Repository layout](#repository-layout)
-14. [Reproducibility record](#reproducibility-record)
+1. [Quick start](#quick-start)
+2. [Architecture](#architecture)
+3. [Current artifacts](#current-artifacts)
+4. [Dataset](#dataset)
+5. [Entry point: `main.py`](#entry-point-mainpy)
+6. [Data preparation](#data-preparation)
+7. [Training (Kaggle Cloud Workflow)](#training-kaggle-cloud-workflow)
+8. [Condition classifier](#condition-classifier)
+9. [Evaluation](#evaluation)
+10. [Inference & reef health pipeline](#inference--reef-health-pipeline)
+11. [Trust / reliability gate](#trust--reliability-gate)
+12. [Overlay and video aggregation](#overlay-and-video-aggregation)
+13. [Streamlit UI](#streamlit-ui)
+14. [Repository layout](#repository-layout)
+15. [Reproducibility record](#reproducibility-record)
 
 ---
+
+## Quick start
+
+### A. Use the trained checkpoints
+
+Both models are tracked in git (`models/checkpoints/yolo26n_seg/weights/best.pt` and `models/checkpoints/condition_resnet18.pt`), so a fresh clone can run inference immediately:
+
+```bash
+python -m pip install -r requirements.txt
+
+# Single image (writes overlay.jpg + report.json to outputs/inference/)
+python main.py infer --image path/to/image.jpg
+
+# Video
+python main.py infer --video path/to/video.mp4 --out outputs/video_analysis
+
+# Streamlit UI
+python main.py app
+```
+
+The condition classifier is loaded automatically (override with `--condition-model`).
+
+### B. Full setup (reproduce the artifacts)
+
+The dataset and prepared data are **not tracked in git** (too large), so they must be downloaded and regenerated. The trained weights are already present from the clone, so steps 3–4 are only needed to *retrain*.
+
+```bash
+python -m pip install -r requirements.txt
+
+# 1. Download the Coralscapes snapshot (5.86 GB)
+hf download EPFL-ECEO/coralscapes --repo-type dataset --local-dir datasets/coralscapes_hf
+
+# 2. Prepare the YOLO-format dataset (images, masks, polygon labels, manifest)
+python main.py prepare
+
+# 3. Retrain segmentation on Kaggle (optional — committed weights are used otherwise)
+kaggle kernels push -p kaggle_run/
+kaggle kernels output <your-kaggle-username>/coral-btp-train -p kaggle_results/
+cp kaggle_results/checkpoints/yolo26n_full/weights/best.pt models/checkpoints/yolo26n_seg/weights/best.pt
+
+# 4. Retrain the condition classifier (optional — exact values used for the committed checkpoint)
+python main.py train-condition --per-class 250 --epochs 1 --batch 32
+
+# 5. Evaluate on the full 392-image held-out test split → reports/segmentation_metrics.json
+python main.py evaluate
+
+# 6. Sample inference (reproduces outputs/final_sample/)
+python main.py infer --image data/processed/coralscapes_yolo/images/test/test_000000.png --out outputs/final_sample
+```
+
+Details: step 3 → [Training (Kaggle Cloud Workflow)](#training-kaggle-cloud-workflow), step 4 → [Condition classifier](#condition-classifier), step 5 → [Evaluation](#evaluation).
+
+## Architecture
+
+Three stages: local data preparation, cloud (Kaggle) training, and a local inference pipeline guarded by the trust/reliability gate.
+
+```mermaid
+flowchart TD
+    subgraph S1["1 — Data preparation (local)"]
+        A["EPFL-ECEO/coralscapes snapshot<br/>2,075 images · 39 raw classes"]
+        B["main.py prepare<br/>39 → 7 broad classes · masks → YOLO polygons"]
+        C["data/processed/coralscapes_yolo<br/>images · masks · labels · manifest"]
+        A --> B --> C
+    end
+
+    subgraph S2["2 — Training"]
+        D["kaggle_run/train_kaggle.py<br/>streams HF dataset, converts on the fly"]
+        E["YOLO26n-seg · Kaggle T4<br/>30 epochs · imgsz 512 · batch 16"]
+        F["models/checkpoints/yolo26n_seg<br/>weights/best.pt"]
+        G["make_crops → ResNet18 (local)<br/>alive / bleached / dead, ≤250 crops per class"]
+        H["models/checkpoints<br/>condition_resnet18.pt"]
+        D --> E --> F
+        G --> H
+    end
+
+    C --> D
+    C --> G
+    C --> I["main.py evaluate<br/>full 392-image test split"]
+    F --> I
+    I --> J["reports/segmentation_metrics.json<br/>mIoU 0.404 · ECE 0.375 · per-class IoU"]
+
+    subgraph S3["3 — Inference + trust gate (CoralPipeline, local)"]
+        K["image / video<br/>main.py infer · Streamlit app"]
+        L["assess_image — quality<br/>blur · exposure · contrast · color cast"]
+        M["YOLO26n-seg segmentation<br/>conf 0.20"]
+        N["health indicators<br/>LCC · bleaching % · mortality % · coral:algae → category"]
+        O["crop condition verification<br/>ResNet18 (advisory)"]
+        P["prediction uncertainty<br/>confidence entropy"]
+        Q{"review_decision<br/>accepted / needs_review"}
+        R["overlay.jpg + report.json<br/>video: frame overlays + aggregate summary"]
+        K --> L
+        K --> M
+        M --> N
+        M --> O
+        M --> P
+        L --> Q
+        N --> Q
+        O --> Q
+        P --> Q
+        Q --> R
+    end
+
+    F -.-> M
+    H -.-> O
+```
 
 ## Current artifacts
 
 - **Active segmentation checkpoint**: `models/checkpoints/yolo26n_seg/weights/best.pt`
   - Kaggle T4, 30 epochs, imgsz 512, batch 16, full Coralscapes training set (1,517 train images)
   - Mask mAP50 ≈ 0.165 on the val split (from `models/checkpoints/yolo26n_seg/results.csv`)
-  - Operating mIoU ≈ 0.296 at conf 0.20 (20-image evaluation with Expected Calibration Error ECE = 0.208)
+  - Operating mIoU ≈ 0.404 at conf 0.20 on the full 392-image test split, with Expected Calibration Error ECE ≈ 0.375
 - **Condition classifier**: `models/checkpoints/condition_resnet18.pt`
   - ResNet18, evaluated on coral crops (live, bleached, dead) for secondary condition verification
-- **Evaluation report**: `reports/segmentation_metrics.json` (per-class IoU, confusion matrix, and binned calibration stats)
+- **Evaluation report**: `reports/segmentation_metrics.json` — full 392-image test split at conf 0.20 (mIoU ≈ 0.404, ECE ≈ 0.375; per-class IoU, confusion matrix, binned calibration stats)
 - **Training record**: `reports/training_run.json`
-- **Prepared dataset**: `data/processed/coralscapes_yolo/manifest.csv` (2,075 images; train/val/test = 1,517/166/392)
-- **Sample inference**: `outputs/final_sample/overlay.jpg`, `outputs/final_sample/report.json`
+- **Prepared dataset**: 2,075 images (train/val/test = 1,517/166/392), generated by `main.py prepare` → `data/processed/coralscapes_yolo/` (not tracked in git)
 
 ## Dataset
 
 - Source: `EPFL-ECEO/coralscapes` (Coralscapes, ICCVW 2025)
-  - Canonical snapshot: `datasets/coralscapes_hf/` (5.86 GB, Parquet format)
+  - Canonical snapshot: `datasets/coralscapes_hf/` (5.86 GB, Parquet format) — not tracked in git
+  - Download: `hf download EPFL-ECEO/coralscapes --repo-type dataset --local-dir datasets/coralscapes_hf`
 - 39 raw classes mapped to 7 broad visible classes (`coral_alive`, `coral_bleached`, `coral_dead`, `algae`, `rubble`, `sand_rock`, `other`) — logic in `src/data/label_map.py`
-
-## Quick start
-
-```bash
-python -m pip install -r requirements.txt
-
-# 1. Prepare YOLO-format dataset from the local HF snapshot
-python main.py prepare
-
-# 2. Full training is the Kaggle kernel (see "Training (Kaggle kernel)").
-#    The trained best.pt/last.pt and plots are already under models/.
-
-# 3. The condition classifier checkpoint already exists at models/checkpoints/condition_resnet18.pt.
-
-# 4. Evaluate segmentation
-python main.py evaluate --model models/checkpoints/yolo26n_seg/weights/best.pt --max-images 20
-
-# 5. Single image inference
-python main.py infer --model models/checkpoints/yolo26n_seg/weights/best.pt --image path/to/image.jpg
-
-# 6. Video inference
-python main.py infer --model models/checkpoints/yolo26n_seg/weights/best.pt --video path/to/video.mp4 --out outputs/video_analysis
-
-# 7. Streamlit UI
-python main.py app
-```
 
 ## Entry point: `main.py`
 
@@ -76,11 +156,13 @@ Every command-line workflow is funneled through `main.py`:
 
 ```bash
 python main.py prepare [--root DATASETS_HF] [--out PROCESSED] [--max-images-per-split N] [--copy-images]
-python main.py evaluate --model CKPT [--manifest ...] [--raw-classes ...] [--max-images N] [--conf ...] [--out ...]
-python main.py infer --model CKPT [--image IMG | --video VID] [--out DIR] [--imgsz 512] [--conf ...]
+python main.py evaluate [--model CKPT] [--manifest ...] [--raw-classes ...] [--max-images N] [--conf ...] [--out ...]
+python main.py infer [--model CKPT] [--condition-model CKPT] [--image IMG | --video VID] [--out DIR] [--imgsz 512] [--conf ...]
 python main.py train-condition [--manifest ...] [--raw-classes ...] [--crops ...] [--checkpoint ...] [--per-class N] [--epochs N] [--batch N]
 python main.py app [--port 8501]
 ```
+
+`--model` defaults to the active checkpoint `models/checkpoints/yolo26n_seg/weights/best.pt` for both `evaluate` and `infer`.
 
 - `prepare` calls `src/data/prepare.py:prepare()` — converts the local HF Coralscapes snapshot into the YOLO segmentation dataset (manifest.csv, data.yaml, label_map.json, classes.json, YOLO polygon labels).
 - `evaluate` calls `src/evaluate/segmentation.py:evaluate()` — per-class IoU, mIoU, confusion matrix.
@@ -109,164 +191,61 @@ Label conversion: `raw_to_broad` collapses raw classes into 7 visible categories
 
 ## Training (Kaggle Cloud Workflow)
 
-### Architecture Partition: Kaggle vs. Local Machine
+Segmentation training runs **only** on Kaggle: the free Tesla T4 (16 GB VRAM) trains YOLO26n-seg on 1,517 images for 30 epochs in ~1.5 hours, where consumer 4 GB GPUs risk CUDA OOM and take 20+ hours. Everything else — preparation, evaluation, inference, trust gate, dashboard — runs locally, and once `best.pt` is downloaded to `models/checkpoints/yolo26n_seg/weights/best.pt`, no further Kaggle compute is needed.
 
-The project is strictly partitioned between **heavy cloud training** and **local deployment**:
+**Kernel files** (`kaggle_run/`):
 
-```text
-┌────────────────────────────────────────────────────────┐
-│                   KAGGLE (Cloud GPU)                   │
-│                                                        │
-│  • Task: Heavy segmentation training ONLY              │
-│  • Hardware: Free Tesla T4 (16 GB VRAM)                │
-│  • Files: kaggle_run/train_kaggle.py                   │
-│           kaggle_run/kernel-metadata.json              │
-│  • Output: best.pt, last.pt, training curves, CSV      │
-└──────────────────────────┬─────────────────────────────┘
-                           │ (Download weights once via CLI)
-                           ▼
-┌────────────────────────────────────────────────────────┐
-│             LOCAL MACHINE (Your PC / Laptop)           │
-│                                                        │
-│  1. Data Preparation:       python main.py prepare     │
-│  2. Model Evaluation:       python main.py evaluate    │
-│  3. Image/Video Inference:  python main.py infer       │
-│  4. Trust/Reliability Gate: src/trust/reliability.py   │
-│  5. Interactive Dashboard:  python main.py app         │
-│  6. Crop Classifier (Train):python main.py train-cond. │
-└────────────────────────────────────────────────────────┘
-```
+- `train_kaggle.py` — standalone remote script: installs `ultralytics`/`datasets`/`huggingface_hub`, downloads `id2label.json` and maps the 39 raw classes to the 7 broad categories, streams the HF dataset split-by-split and converts masks to YOLO polygons (`cv2.findContours` + `cv2.approxPolyDP`) under `/kaggle/working/coralscapes_yolo_hf/`, writes `data.yaml`, then trains from base weights `yolo26n-seg.pt` with mixed precision:
 
-> **Why train on Kaggle?**  
-> Training YOLO26n-seg on 1,517 high-resolution images ($512\text{px}$) for 30 epochs takes **~1.5 hours** on a Kaggle Tesla T4 GPU (16 GB VRAM). Training locally on consumer 4 GB GPUs (like GTX 1650) or CPUs risks CUDA Out-Of-Memory errors and takes 20+ hours. Once `best.pt` is downloaded to `models/checkpoints/yolo26n_seg/weights/best.pt`, **no further Kaggle compute is needed**.
-
----
-
-### Kaggle Codefiles & Configuration
-
-1. **`kaggle_run/train_kaggle.py`**:
-   The standalone, automated training script executed remotely inside the Kaggle environment.
-   - **Stage 1 (Environment Setup)**: Installs runtime dependencies (`ultralytics`, `datasets`, `huggingface_hub`).
-   - **Stage 2 (Label Mapping)**: Downloads `id2label.json` from `EPFL-ECEO/coralscapes` and maps raw classes to the canonical 7 visible benthic categories (`coral_alive`, `coral_bleached`, `coral_dead`, `algae`, `rubble`, `sand_rock`, `other`).
-   - **Stage 3 (Streaming Data Conversion)**: Streams the Hugging Face dataset split-by-split (`train`, `validation`, `test`) without downloading bulky multi-gigabyte archives upfront. For each image, it converts segmentation masks into normalized YOLO polygon coordinates via `cv2.findContours` + `cv2.approxPolyDP` and saves them to `/kaggle/working/coralscapes_yolo_hf/`.
-   - **Stage 4 (Dataset Configuration)**: Writes `/kaggle/working/coralscapes_yolo_hf/data.yaml` linking Ultralytics to the converted directories and class names.
-   - **Stage 5 (Model Training)**: Loads base weights `yolo26n-seg.pt` and trains with mixed precision:
-     ```python
-     model.train(
-         data="/kaggle/working/coralscapes_yolo_hf/data.yaml",
-         epochs=30,
-         imgsz=512,
-         batch=16,
-         device=0,
-         workers=2,
-         project="/kaggle/working/checkpoints",
-         name="yolo26n_full",
-         patience=10,
-         plots=True,
-     )
-     ```
-   - **Stage 6 (Export)**: Saves trained weights (`best.pt`, `last.pt`), training loss graphs, PR curves, and confusion matrix plots to `/kaggle/working/checkpoints/yolo26n_full/`.
-
-2. **`kaggle_run/kernel-metadata.json`**:
-   Configures the Kaggle CLI kernel runner:
-   ```json
-   {
-     "id": "<your-kaggle-username>/coral-btp-train",
-     "title": "coral-btp-train",
-     "code_file": "train_kaggle.py",
-     "language": "python",
-     "kernel_type": "script",
-     "is_private": "true",
-     "enable_gpu": "true",
-     "enable_internet": "true",
-     "accelerator": "NvidiaTeslaT4"
-   }
-   ```
-
----
-
-### Step-by-Step Kaggle Training Commands
-
-Follow these steps if you want to retrain the segmentation model from scratch:
-
-#### Step 1: Install and Authenticate Kaggle CLI
-```bash
-python -m pip install kaggle
-```
-Set up your Kaggle API credentials:
-- Go to [kaggle.com/settings](https://www.kaggle.com/settings) → **API** → click **Create New Token** (downloads `kaggle.json`).
-- Place it in `~/.kaggle/kaggle.json` and set secure permissions:
-  ```bash
-  mkdir -p ~/.kaggle
-  cp /path/to/kaggle.json ~/.kaggle/
-  chmod 600 ~/.kaggle/kaggle.json
-  ```
-- Verify authentication:
-  ```bash
-  kaggle kernels list --mine
+  ```python
+  model.train(data="/kaggle/working/coralscapes_yolo_hf/data.yaml", epochs=30, imgsz=512,
+              batch=16, device=0, workers=2, project="/kaggle/working/checkpoints",
+              name="yolo26n_full", patience=10, plots=True)
   ```
 
-#### Step 2: Configure Kernel Metadata
-Open `kaggle_run/kernel-metadata.json` and update the `"id"` field with your Kaggle username:
-```json
-"id": "<your-kaggle-username>/coral-btp-train"
-```
+  Weights (`best.pt`, `last.pt`), curves, and `results.csv` are exported to `/kaggle/working/checkpoints/yolo26n_full/`.
+- `kernel-metadata.json` — kernel runner config (GPU `NvidiaTeslaT4`, internet on, private script). Update `"id"` to `<your-kaggle-username>/coral-btp-train`; field reference in the [Kaggle API docs](https://github.com/Kaggle/kaggle-api).
 
-#### Step 3: Push the Script & Start Training
-Submit the job to Kaggle's GPU cluster:
-```bash
-kaggle kernels push -p kaggle_run/
-```
-Kaggle will immediately queue and launch a headless script run on a Tesla T4 GPU.
+**Retrain from scratch** (Kaggle CLI install + API token setup: [Kaggle API docs](https://github.com/Kaggle/kaggle-api)):
 
-#### Step 4: Monitor Training Progress & Logs
-Check if the kernel is queued, running, or complete:
 ```bash
-kaggle kernels status <your-kaggle-username>/coral-btp-train
-```
-Stream real-time terminal output and training progress:
-```bash
-kaggle kernels logs <your-kaggle-username>/coral-btp-train
-```
-
-#### Step 5: Download Trained Checkpoints & Outputs
-Once the status shows `complete`, download the generated model weights and training reports:
-```bash
-# Download to a temporary results directory
+kaggle kernels push -p kaggle_run/                                 # queue the T4 run
+kaggle kernels status <your-kaggle-username>/coral-btp-train       # poll until complete
+kaggle kernels logs <your-kaggle-username>/coral-btp-train         # stream training output
 kaggle kernels output <your-kaggle-username>/coral-btp-train -p kaggle_results/
-
-# Copy the best weights into the active local checkpoint path
 cp kaggle_results/checkpoints/yolo26n_full/weights/best.pt models/checkpoints/yolo26n_seg/weights/best.pt
 ```
 
-#### Step 6: Seamless Local Handoff
-Once `best.pt` is placed in `models/checkpoints/yolo26n_seg/weights/`, the entire local workflow runs immediately:
-```bash
-# 1. Evaluate held-out test split with calibration metrics
-python main.py evaluate --model models/checkpoints/yolo26n_seg/weights/best.pt
-
-# 2. Run inference on images or video
-python main.py infer --model models/checkpoints/yolo26n_seg/weights/best.pt --image path/to/image.jpg
-
-# 3. Launch interactive web dashboard
-python main.py app
-```
+After the handoff, everything continues locally — `python main.py evaluate`, `python main.py infer`, `python main.py app` (see [Quick start](#quick-start)).
 
 ---
 
 ## Condition classifier
 
-Checkpoint: `models/checkpoints/condition_resnet18.pt` (ResNet18 trained on crops
-sampled from the Coralscapes masks — live/bleached/dead coral, up to 250 crops per
-class).
+Checkpoint: `models/checkpoints/condition_resnet18.pt` — torchvision ResNet18 trained
+from scratch on 128×128 crops sampled from the Coralscapes masks (`coral_alive`,
+`coral_bleached`, `coral_dead`).
 
-Retraining is available via the local entrypoint:
+The current checkpoint was produced with (all defaults):
+
 ```bash
-python main.py train-condition [--manifest ...] [--raw-classes ...] [--crops ...] [--checkpoint ...] [--per-class N] [--epochs N] [--batch N]
+python main.py train-condition --per-class 250 --epochs 1 --batch 32
 ```
-which calls `src/models/train_condition.py:make_crops()` (crop extraction from
-segmentation masks) followed by `train_condition()` (ResNet18 training). The
-code lives in `src/models/train_condition.py`.
+
+which runs `make_crops()` then `train_condition()`, both in `src/models/train_condition.py`:
+
+- `make_crops()` draws up to 2 crops per image per class from the segmentation masks,
+  capped at 250 crops per class per split (seed 42) → 450 train / 382 val crops under
+  `data/processed/condition_crops/`.
+- `train_condition()` trains ResNet18 from scratch with AdamW (lr 1e-3,
+  weight decay 1e-4) on 128×128 inputs.
+
+Current performance is modest — macro F1 ≈ 0.23, balanced accuracy ≈ 0.34 on the 382
+validation crops, with `coral_dead` never predicted correctly (full metrics in
+`reports/training_run.json`). Its crop-level votes are therefore treated as an
+advisory signal alongside the segmentation masks, not as ground truth.
+
+Full option set: `python main.py train-condition [--manifest ...] [--raw-classes ...] [--crops ...] [--checkpoint ...] [--per-class N] [--epochs N] [--batch N]`.
 
 ## Evaluation
 
@@ -279,7 +258,15 @@ For each row in `manifest.csv` (filtered to `split == "test"`, optionally trunca
 3. Produce a confusion matrix: unsegmented valid pixels are mapped to `other` to account for recall.
 4. Compute per-class IoU, mean IoU (mIoU), and Expected Calibration Error (ECE) across detection confidences.
 
-Emitted report: `reports/segmentation_metrics.json` (contains `images`, `confidence_threshold`, `mIoU`, `per_class_iou`, `calibration` with binned reliability stats, and `confusion_matrix`).
+Report schema: `images`, `confidence_threshold`, `mIoU`, `per_class_iou`, `calibration` (binned reliability stats), and `confusion_matrix`.
+
+The current report was produced with (full 392-image test split, conf 0.20):
+
+```bash
+python main.py evaluate
+```
+
+`--max-images N` is only a pipeline smoke test: it takes the *first N manifest rows* (not a random sample), whose composition is atypical, so subset metrics are not representative and should not be quoted as model performance.
 
 ## Inference & reef health pipeline
 
@@ -319,11 +306,11 @@ Quality: `src/data/quality.py::assess_image` checks Laplacian-blur variance, bri
 
 ## Overlay and video aggregation
 
-Overlay drawing is in `src/inference/pipeline.py` after mask blending:
+Overlay drawing happens inline in `CoralPipeline.infer()` (`src/inference/pipeline.py`):
 
-1. **Mask blend**: each predicted mask is blended `0.55 * image + 0.45 * class_color`.
-2. **Boxes + labels** (`_draw_annotations`): each instance box drawn with color by class; label text `class_name score` above each box. `fs` (font scale) = `max(0.5, min(1.6, width/900.0))`, `bt` (thickness) = `max(2, round(width/550))`.
-3. **Top-left info panel**: coverage %, mean confidence, status, and per-class coverage percentages, on a semi-transparent dark panel width = `width * 0.32`.
+1. **Mask blend**: each predicted mask region is blended `0.55 * image + 0.45 * class_color`.
+2. **Boxes + labels**: each instance box is drawn in its class color; label text `class_name score` above each box, with a `[condition]` suffix appended when the crop classifier evaluated that instance. `fs` (font scale) = `max(0.45, min(1.2, width/1200.0))`, `bt` (thickness) = `max(1, round(width/600))`.
+3. **Top-left HUD panel**: reef health category, LCC / bleached / algae cover percentages, trust status with coverage % and mean confidence, plus a flags line when reliability reasons are present — on a semi-transparent dark panel (50/50 blend) of width `max(420, width * 0.42)`.
 
 Manual: the same overlay is reused for video by `infer_video()`. Per-frame overlays are `frame_NNNNNN_overlay.jpg` in the output dir; aggregate JSON has `sampled_frames`, framewise `frames`, and `summary` with mean composition and status across accepted frames (or all frames if none accepted).
 
@@ -338,36 +325,38 @@ Manual: the same overlay is reused for video by `infer_video()`. Per-frame overl
 
 ## Repository layout
 
+Markers: **✓ tracked** in git · **✗ not tracked** — downloaded or generated via [Quick start](#quick-start) path B.
+
 ```
 BTP/
-├── README.md
-├── problem.md, sources.md, requirements.txt
-├── configs/labels.yaml                    # class list alias
-├── datasets/coralscapes_hf/               # HF snapshot (5.86 GB, parquet)
-├── data/processed/coralscapes_yolo/       # manifest + YOLO labels + masks + data.yaml
-├── data/processed/condition_crops/        # ResNet18 training crops
-├── models/checkpoints/yolo26n_seg/        # active Kaggle T4 checkpoint
-│   ├── weights/best.pt, weights/last.pt
-│   ├── args.yaml, results.csv, results.png
-│   ├── BoxF1_curve.png … confusion_matrix_normalized.png
-├── models/checkpoints/condition_resnet18.pt
-├── kaggle_run/                            # remote training job
-│   ├── train_kaggle.py
-│   └── kernel-metadata.json
-├── main.py                             # single entrypoint (prepare/evaluate/infer/app)
-├── src/
-│   ├── data/label_map.py, prepare.py, quality.py
-│   ├── evaluate/segmentation.py
-│   ├── inference/pipeline.py
-│   ├── trust/reliability.py
-│   └── app/streamlit_app.py
-├── reports/
-│   ├── segmentation_metrics.json
-│   └── training_run.json
-├── outputs/
-│   ├── final_sample/overlay.jpg, report.json
-│   └── final_video_inference/
-└── project/ , papers/
+├── README.md                             ✓ this file
+├── requirements.txt                      ✓ Python dependencies
+├── main.py                               ✓ single CLI entrypoint: prepare · evaluate · infer · train-condition · app
+├── src/                                  ✓ all pipeline code
+│   ├── data/        label_map.py · prepare.py · quality.py   # 39→7 label map · dataset build · image-quality checks
+│   ├── models/      train_condition.py                       # crop extraction + ResNet18 condition training
+│   ├── evaluate/    segmentation.py                          # test-split mIoU · per-class IoU · ECE · confusion matrix
+│   ├── inference/   pipeline.py                              # CoralPipeline: quality → segmentation → health → trust gate
+│   ├── trust/       reliability.py                           # ECE · temperature scaling · entropy · review_decision
+│   └── app/         streamlit_app.py                         # dashboard (main.py app)
+├── configs/labels.yaml                   ✓ 7 broad classes + ignored raw classes
+├── kaggle_run/                           ✓ cloud GPU job (train_kaggle.py · kernel-metadata.json)
+│
+├── models/checkpoints/                   ✓ trained weights + training curves
+│   ├── yolo26n_seg/                      #   weights/best.pt · last.pt · args.yaml · results.csv/png · PR & F1 curves
+│   └── condition_resnet18.pt             #   ResNet18 checkpoint for crop-level condition verification 
+├── reports/                              ✓ evaluation reports + training record
+│   ├── segmentation_metrics.json         #   full 392-image test-split eval
+│   └── training_run.json                 #   training params · environment · classifier metrics
+├── project/                              ✓ decision docs · dataset-inventory.md · paper-inventory.md
+│
+├── datasets/coralscapes_hf/              ✗ HF snapshot, 5.86 GB parquet          ← path B, step 1
+├── data/processed/                       ✗ generated by prepare / train-condition  ← path B, steps 2 & 4
+│   ├── coralscapes_yolo/                 #   images · masks · labels · manifest.csv · data.yaml · label_map.json
+│   └── condition_crops/                  #   ResNet18 train/val crops
+├── outputs/                              ✗ inference results (overlays + JSON reports)
+└── papers/                               ✗ reference PDFs — index: project/paper-inventory.md
+
 ```
 
 ## Reproducibility record
@@ -378,7 +367,7 @@ BTP/
 {
   "project": "Trustworthy AI-Assisted Coral Reef Health Assessment",
   "dataset": {"name":"Coralscapes","prepared_manifest":"...","images":2075,"by_split":{...},"classes":"configs/labels.yaml"},
-  "segmentation": {"architecture":"Ultralytics YOLO26n-seg","checkpoint":"models/checkpoints/yolo26n_seg/weights/best.pt","trainer":"Kaggle T4","epochs":30,"imgsz":512,"batch":16,"operating_confidence":0.20,"metrics_mAP50_mask":0.1652},
+  "segmentation": {"architecture":"Ultralytics YOLO26n-seg","checkpoint":"models/checkpoints/yolo26n_seg/weights/best.pt","trainer":"Kaggle T4","device":"T4 x2","epochs":30,"imgsz":512,"batch":16,"operating_confidence":0.20,"metrics_mAP50_mask":0.1652},
   "evaluation_reports":["reports/segmentation_metrics.json"]
 }
 ```
