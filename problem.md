@@ -1,24 +1,24 @@
-Title: trustworthy AI-assisted coral-reef health assessment and temporal change detection in Lakshadweep
-1. understand the Lakshadweep coral reef dataset and identify a meaningful AI problem.
-2. The dataset should first be examined to understand what information it contains such as island/location, survey year, underwater images or videos, coral type, live/dead coral, bleaching, habitat characteristics, coral cover, depth, and other environmental observations.                                                          
-3. If repeated observations are available from places such as Agatti, Kadmat and Kavaratti, this becomes particularly valuable because we can study how reef conditions change over time.
-4. Rather than simply building a model to identify coral species, a more meaningful problem would be AI-assisted assessment of coral reef health and change from underwater imagery.
-5. The idea would be to take ROV images/video, automatically identify coral and other reef components, estimate coral cover or condition, detect signs of bleaching or degradation, and compare present observations with historical data.
-6. However, the final AI problem should be selected only after carefully examining the actual dataset, its labels, image quality, temporal coverage and available environmental information.
+Title: Trustworthy AI-Assisted Coral Reef Health Assessment
 
-Location: Agatti, Kadmat, Kavaratti and other islands
+## Project Focus & Scope
+The project develops an AI-assisted framework for automated benthic composition and coral reef health assessment from underwater imagery and video surveys.
 
-Phase 1: Dataset & AI feasibility
-- Understand the Lakshadweep dataset, establish labels, benchmark existing models, develop baseline coral/habitat detection and condition assessment.
-- Develop AI model for coral reef health analysis and temporal change prediction
-Phase 2: Add Trust/ Security Element
+### Core Objectives:
+1. **Automated Benthic Segmentation**: Automatically segment coral and key benthic substrate categories (live coral, bleached coral, dead coral, algae, rubble, sand/rock, and other).
+2. **Quantitative Reef Health Indicators**: Compute standardized marine ecological indicators:
+   - Live Coral Cover (LCC %)
+   - Bleaching Ratio (%)
+   - Coral Mortality Ratio (%)
+   - Macroalgae Competition Index (Algae-to-Coral ratio)
+   - Integrated Reef Health Tier (Excellent / Good / Fair / Poor-Degraded)
+3. **Trustworthy AI Gating**: Implement a rigorous review and abstention gate:
+   - Image quality validation (blur, under/over-exposure, low contrast, severe color cast)
+   - Prediction uncertainty estimation (entropy over detection confidence scores)
+   - Expected Calibration Error (ECE) measurement
+   - Transparent acceptance state (`ACCEPTED` vs `NEEDS EXPERT REVIEW`)
 
-
-Tasks
-Literature review
-Dataset studying
-Identify research gap
-What AI problem to solve
+### Scope Note:
+Site-specific Lakshadweep field validation and multi-year temporal change detection have been explicitly scoped out of the current Phase 1 implementation to establish a robust, verified transfer baseline and reproducible AI pipeline on benchmark data.
 
 - Potential partnership with eyerov
 

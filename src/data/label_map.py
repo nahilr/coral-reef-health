@@ -12,13 +12,26 @@ BROAD_TO_ID = {name: i for i, name in enumerate(BROAD_CLASSES)}
 
 def load_coralscapes_classes(path: str | Path) -> dict[int, str]:
     raw = json.loads(Path(path).read_text())
-    return {int(v): k for k, v in raw.items()}
+    first_key, first_val = next(iter(raw.items()))
+    try:
+        int(first_key)
+        return {int(k): str(v) for k, v in raw.items()}
+    except ValueError:
+        pass
+    try:
+        int(first_val)
+        return {int(v): str(k) for k, v in raw.items()}
+    except ValueError:
+        pass
+    return {i: str(k) for i, k in enumerate(raw.keys())}
 
 
 def raw_name_to_broad(name: str) -> str | None:
     n = name.lower().strip()
     if n in {"background", "dark"}:
         return None
+    if n == "dead clam":
+        return "other"
     if "algae" in n or n == "seagrass":
         return "algae"
     if n == "rubble":
@@ -29,7 +42,7 @@ def raw_name_to_broad(name: str) -> str | None:
         return "coral_bleached"
     if "dead" in n:
         return "coral_dead"
-    if "alive" in n or "coral" in n:
+    if "alive" in n or "coral" in n or "millepora" in n or "turbinaria" in n:
         return "coral_alive"
     return "other"
 

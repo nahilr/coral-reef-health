@@ -41,6 +41,7 @@ def main() -> None:
 
     inf = sub.add_parser("infer", help="image or video inference")
     inf.add_argument("--model", required=True)
+    inf.add_argument("--condition-model", default="models/checkpoints/condition_resnet18.pt")
     inf.add_argument("--image")
     inf.add_argument("--video")
     inf.add_argument("--out", default="outputs/inference")
@@ -66,11 +67,14 @@ def main() -> None:
         print(json.dumps(prepare(args.root, args.out, args.max_images_per_split, args.copy_images), indent=2))
     elif args.cmd == "evaluate":
         from src.evaluate.segmentation import evaluate
-        print(json.dumps(evaluate(args.model, args.manifest, args.raw_classes, max_images=args.max_images, conf=args.conf), indent=2))
+        print(json.dumps(evaluate(args.model, args.manifest, args.raw_classes,
+                                  max_images=args.max_images, conf=args.conf, out=args.out), indent=2))
     elif args.cmd == "infer":
-        assert args.image or args.video, "specify --image or --video"
+        if not args.image and not args.video:
+            p.error("Must specify either --image or --video")
         from src.inference.pipeline import CoralPipeline
-        pipeline = CoralPipeline(args.model, imgsz=args.imgsz, conf=args.conf)
+        pipeline = CoralPipeline(args.model, condition_model_path=args.condition_model,
+                                 imgsz=args.imgsz, conf=args.conf)
         out = Path(args.out)
         out.mkdir(parents=True, exist_ok=True)
         if args.image:

@@ -14,12 +14,17 @@ from PIL import Image
 from .label_map import BROAD_CLASSES, load_coralscapes_classes, make_raw_to_broad
 
 
-def contours_to_yolo(mask: np.ndarray, broad_id: int, output_size=(1024, 512), min_area=20):
-    resized = cv2.resize(mask, output_size, interpolation=cv2.INTER_NEAREST)
+def contours_to_yolo(mask: np.ndarray, broad_id: int, output_size=None, min_area=20):
+    if output_size is not None:
+        resized = cv2.resize(mask, output_size, interpolation=cv2.INTER_NEAREST)
+        width, height = output_size
+    else:
+        h, w = mask.shape[:2]
+        width, height = max(64, w // 2), max(32, h // 2)
+        resized = cv2.resize(mask, (width, height), interpolation=cv2.INTER_NEAREST)
     binary = (resized == broad_id).astype(np.uint8)
     contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     lines = []
-    width, height = output_size
     for contour in contours:
         if cv2.contourArea(contour) < min_area or len(contour) < 3:
             continue
@@ -111,6 +116,8 @@ def prepare_from_hf_snapshot(root: Path, out: Path, max_images_per_split: int | 
         split_index = 0
         rows_for_split = 0
         for f in files:
+            if max_images_per_split and rows_for_split >= max_images_per_split:
+                break
             table = pq.read_table(str(f))
             for row in table.to_pylist():
                 if max_images_per_split and rows_for_split >= max_images_per_split:
