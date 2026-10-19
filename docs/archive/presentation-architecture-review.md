@@ -1,5 +1,7 @@
 # Architecture Review - Revised Scope
 
+> Archived after consolidation. Current architecture and trust-contract decisions are in [btp-recommended-approach.md](../btp-recommended-approach.md).
+
 ## Decision
 
 The original architecture is worth retaining, with two changes: remove the location-specific and temporal modules, and make reliability a mandatory gate rather than a final add-on.

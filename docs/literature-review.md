@@ -184,4 +184,4 @@ The project should therefore present reef health as a set of visible, measurable
 
 ## Selected local papers
 
-The PDF collection is organized under [ `/mnt/Work/BTP/papers/` ](/mnt/Work/BTP/papers/). Current scope and implementation decisions are in [btp-recommended-approach.md](/mnt/Work/BTP/project/btp-recommended-approach.md), [presentation-architecture-review.md](/mnt/Work/BTP/project/presentation-architecture-review.md), and [implementation-requirements.md](/mnt/Work/BTP/project/implementation-requirements.md).
+The PDF collection is organized under [`/mnt/Work/BTP/papers/`](/mnt/Work/BTP/papers/). Current scope and implementation decisions are consolidated in [btp-recommended-approach.md](/mnt/Work/BTP/project/btp-recommended-approach.md), with datasets in [dataset-inventory.md](/mnt/Work/BTP/project/dataset-inventory.md) and paper fit/current metrics in [paper-inventory.md](/mnt/Work/BTP/project/paper-inventory.md).

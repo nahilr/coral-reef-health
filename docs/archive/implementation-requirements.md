@@ -1,5 +1,7 @@
 # Implementation Requirements
 
+> Archived after consolidation. Current environment and reproducibility guidance is in [btp-recommended-approach.md](../btp-recommended-approach.md).
+
 ## Recommended environment
 
 | Need | Local machine | Google Colab |

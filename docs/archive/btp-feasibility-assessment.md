@@ -1,5 +1,7 @@
 # Feasibility - Trustworthy AI-Assisted Coral Reef Health Assessment
 
+> Archived after consolidation. The current feasibility and scope guidance is in [btp-recommended-approach.md](../btp-recommended-approach.md).
+
 ## Verdict
 
 **Feasible in 14-18 weeks** as a general underwater-imagery health-assessment system, provided the scope is restricted to (1) benthic composition, (2) visible bleaching/condition risk where labels exist, and (3) explicit reliability warnings. It is not feasible in the same period to claim disease diagnosis, a universal ecological-health score, real-world deployment accuracy everywhere, or causal environmental explanations.

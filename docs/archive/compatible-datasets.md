@@ -1,5 +1,7 @@
 # Dataset Plan
 
+> Archived after consolidation. Current dataset availability, roles, and constraints are in [dataset-inventory.md](../dataset-inventory.md).
+
 ## Required datasets
 
 | Priority | Dataset | Expected role | Selection rule |

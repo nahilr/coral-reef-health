@@ -37,8 +37,6 @@ def broad(name: str):
     n = name.lower().strip()
     if n in {"background", "dark"}:
         return None
-    if n == "dead clam":
-        return 6
     if "algae" in n or n == "seagrass":
         return 3
     if n == "rubble":
@@ -49,7 +47,7 @@ def broad(name: str):
         return 1
     if "dead" in n:
         return 2
-    if "alive" in n or "coral" in n or "millepora" in n or "turbinaria" in n:
+    if "alive" in n or "coral" in n:
         return 0
     return 6
 

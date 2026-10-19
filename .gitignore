@@ -7,18 +7,20 @@ __pycache__/
 
 # Environments
 .venv/
+.venv-*/
 venv/
 
 # Training outputs & checkpoints (downloadable artifacts)
 runs/
+*.log
 
-# Data (too large for git; see project/dataset-inventory.md)
-datasets/
-papers/
-data/
+# Data (too large for git; see data/README.md)
+/data/*
+!/data/README.md
+/papers/
 
 # Inference outputs
-outputs/
+/outputs/
 
 # Misc
 tmp/
@@ -30,7 +32,10 @@ tmp/
 .codex/
 skills-lock.json
 
-
 # Pretrained base weights (download on demand)
 yolo26n-seg.pt
 problem.md
+
+# Phase I presentation/report artifacts (kept locally, not in git)
+/BTP artifacts/
+/BTP_Phase I_Review I_Presentation _Group_9.pptx.pdf
