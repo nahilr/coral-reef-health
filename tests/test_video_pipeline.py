@@ -24,9 +24,8 @@ def create_dummy_video(path: Path, num_frames: int = 6, width: int = 320, height
 
 
 def test_video_to_video_generation() -> None:
-    model_path = Path("models/checkpoints/yolo26n_sem_v2/weights/best.pt")
+    model_path = Path("models/checkpoints/yolo26n_sem/weights/best.pt")
     if not model_path.exists():
-        # Fallback to V1 if V2 checkpoint is absent
         model_path = Path("models/checkpoints/yolo26n_seg/weights/best.pt")
 
     pipeline = CoralPipeline(model_path, imgsz=320)

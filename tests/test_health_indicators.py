@@ -47,7 +47,7 @@ def test_extensive_bleaching_caps_excellent_cover() -> None:
 
 
 def test_extensive_mortality_caps_excellent_cover() -> None:
-    result = health(coral_alive=500, dead_coral=500)
+    result = health(coral_alive=500, coral_dead=500)
     assert result["live_cover_tier"] == "Excellent"
     assert tier(result) == "Poor / Degraded"
     assert result["coral_condition"] == "Extensive Mortality"
@@ -71,7 +71,7 @@ def test_condition_never_raises_the_tier() -> None:
 
 
 def test_combined_condition_labels() -> None:
-    result = health(coral_alive=400, coral_bleached=300, dead_coral=300)
+    result = health(coral_alive=400, coral_bleached=300, coral_dead=300)
     assert result["coral_condition"] == "Severe Bleaching Alert + High Mortality"
     assert result["reef_health_category"] == "Fair [Severe Bleaching Alert; High Mortality]"
 
@@ -89,8 +89,8 @@ def test_algae_warning_does_not_change_condition() -> None:
     assert result["coral_condition"] == "Stable"
 
 
-def test_legacy_taxonomy_names_still_work() -> None:
-    result = health(branching_coral_alive=400, coral_dead=400, sand=200)
+def test_coral_dead_mortality_ratio() -> None:
+    result = health(coral_alive=400, coral_dead=400, sand=200)
     assert result["live_cover_tier"] == "Good"
     assert result["coral_condition"] == "Extensive Mortality"
     assert tier(result) == "Poor / Degraded"
@@ -102,7 +102,7 @@ def test_condition_only_lowers_tier_over_grid() -> None:
         for bleached in range(0, 1001 - alive, 100):
             for dead in range(0, 1001 - alive - bleached, 100):
                 counts = {"coral_alive": alive, "coral_bleached": bleached,
-                          "dead_coral": dead, "sand": 1000 - alive - bleached - dead}
+                          "coral_dead": dead, "sand": 1000 - alive - bleached - dead}
                 result = compute_health_indicators(counts, 1000)
                 cover = result["live_cover_tier"]
                 combined = tier(result)

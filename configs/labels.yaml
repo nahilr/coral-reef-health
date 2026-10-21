@@ -1,11 +1,11 @@
-dataset: josauder/coralscapesV2
-taxonomy: coralscapes-v2-project-7
-# Compressed 7-class taxonomy of the 95 CoralscapesV2 classes.
-# The explicit 95 -> project mapping lives in configs/label_map.json.
+dataset: josauder/coralscapes
+taxonomy: coralscapes-project-7
+# 7-class task taxonomy for coral reef health assessment.
+# The explicit raw -> project mapping lives in configs/label_map.json.
 classes:
   - coral_alive
   - coral_bleached
-  - dead_coral
+  - coral_dead
   - algae
   - hard_substrate
   - sand
@@ -15,7 +15,7 @@ roles:
   reef:
     - coral_alive
     - coral_bleached
-    - dead_coral
+    - coral_dead
     - algae
     - hard_substrate
     - sand

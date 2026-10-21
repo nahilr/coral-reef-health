@@ -9,18 +9,18 @@
   "project_classes": [
     "coral_alive",
     "coral_bleached",
-    "dead_coral",
+    "coral_dead",
     "algae",
     "hard_substrate",
     "sand",
     "non_reef"
   ],
-  "ground_truth_mapping": "Raw CoralscapesV2 ids are mapped by class name using src/data/v2_label_map.py and configs/labels.yaml; unmapped GT pixels (255) are excluded.",
+  "ground_truth_mapping": "Raw CoralscapesV2 ids are mapped by class name using src/data/label_map.py and configs/labels.yaml; unmapped GT pixels (255) are excluded.",
   "metric_definition": "Pixel accuracy and macro IoU over valid GT pixels; predictions falling in void/ignored categories count as incorrect. Macro IoU averages classes with nonzero union.",
   "models": [
     {
       "model": "Ultralytics YOLO26n-sem",
-      "checkpoint": "models/checkpoints/yolo26n_sem_v2/weights/best.pt",
+      "checkpoint": "models/checkpoints/yolo26n_sem/weights/best.pt",
       "images": 473,
       "protocol": "One aspect-preserving Ultralytics inference pass per 2048x1024 image, imgsz=1024 (long side 1024), FP32. Dense 7-class semantic argmax; no confidence threshold.",
       "inference_images_measured": 473,
@@ -32,7 +32,7 @@
       "per_class_iou": {
         "coral_alive": 0.5946526854053303,
         "coral_bleached": 0.49944256775788304,
-        "dead_coral": 0.12107050475448602,
+        "coral_dead": 0.12107050475448602,
         "algae": 0.4529723105908259,
         "hard_substrate": 0.5282338299798921,
         "sand": 0.6751112582009966,
@@ -113,7 +113,7 @@
     },
     {
       "model": "Ultralytics YOLO26n-seg",
-      "checkpoint": "models/checkpoints/yolo26n_seg_v2/weights/best.pt",
+      "checkpoint": "models/checkpoints/yolo26n_seg/weights/best.pt",
       "images": 473,
       "protocol": "One aspect-preserving Ultralytics inference pass per 2048x1024 image, imgsz=1024, conf=0.25, FP32. Instance masks rasterised to a dense map with highest-confidence-wins; uncovered pixels count as missed predictions.",
       "confidence_threshold": 0.25,
@@ -127,7 +127,7 @@
       "per_class_iou": {
         "coral_alive": 0.6198311912708582,
         "coral_bleached": 0.366962679706594,
-        "dead_coral": 0.10981191564202891,
+        "coral_dead": 0.10981191564202891,
         "algae": 0.18815389564136004,
         "hard_substrate": 0.2843771820631743,
         "sand": 0.6898473311022493,
@@ -222,7 +222,7 @@
       "per_class_iou": {
         "coral_alive": 0.7513240691210895,
         "coral_bleached": 0.7162124998888879,
-        "dead_coral": 0.3455873900639055,
+        "coral_dead": 0.3455873900639055,
         "algae": 0.5867204375137717,
         "hard_substrate": 0.7030766211554753,
         "sand": 0.8046802288831306,
@@ -317,7 +317,7 @@
       "per_class_iou": {
         "coral_alive": 0.8046914380864637,
         "coral_bleached": 0.8355412454205932,
-        "dead_coral": 0.3750950481712666,
+        "coral_dead": 0.3750950481712666,
         "algae": 0.6530227031950544,
         "hard_substrate": 0.7157800187369138,
         "sand": 0.8441242400965011,

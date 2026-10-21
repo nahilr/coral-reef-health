@@ -25,12 +25,12 @@ from ultralytics import YOLO
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from src.data.v2_label_map import (  # noqa: E402
-    V2_CLASSES,
-    V2_TO_ID,
-    load_v2_labels,
-    make_v2_to_project,
-    v2_name_to_class,
+from src.data.label_map import (  # noqa: E402
+    CLASSES,
+    CLASS_TO_ID,
+    load_raw_labels,
+    make_raw_to_project,
+    raw_name_to_class,
 )
 from src.inference.dinov3_dpt import (  # noqa: E402
     DEFAULT_REPO as DINOV3_REPO,
@@ -41,20 +41,20 @@ from src.inference.dinov3_dpt import (  # noqa: E402
 )
 
 TEST_ROOT = ROOT / "data/eval/coralscapesv2-test"
-YOLO_PATH = ROOT / "models/checkpoints/yolo26n_sem_v2/weights/best.pt"
-YOLO_SEG_PATH = ROOT / "models/checkpoints/yolo26n_seg_v2/weights/best.pt"
+YOLO_PATH = ROOT / "models/checkpoints/yolo26n_sem/weights/best.pt"
+YOLO_SEG_PATH = ROOT / "models/checkpoints/yolo26n_seg/weights/best.pt"
 SEGFORMER_PATH = ROOT / "models/pretrained/segformer-b5-coralscapesv2-95"
 DINOV3_PATH = ROOT / "models/pretrained/coralscapesv2-dinov3-vitl-lora-dpt-95_class"
 DATA_LABELS = TEST_ROOT / "id2label.json"
-OUT = ROOT / "reports/yolo26n_sem_vs_segformer_b5_coralscapesv2.json"
+OUT = ROOT / "reports/model_comparison.json"
 IMGSZ = 1024
-N_CLASSES = len(V2_CLASSES)
+N_CLASSES = len(CLASSES)
 IGNORE = 255
 PRED_IGNORE = N_CLASSES
 # Cache directories are keyed by taxonomy size so a class-count change can
 # never silently reuse predictions computed under a different taxonomy.
-YOLO_CACHE = TEST_ROOT / f"predictions/yolo26n_sem_v2_{N_CLASSES}cls"
-YOLO_SEG_CACHE = TEST_ROOT / f"predictions/yolo26n_seg_v2_{N_CLASSES}cls"
+YOLO_CACHE = TEST_ROOT / f"predictions/yolo26n_sem_{N_CLASSES}cls"
+YOLO_SEG_CACHE = TEST_ROOT / f"predictions/yolo26n_seg_{N_CLASSES}cls"
 SEGFORMER_CACHE = TEST_ROOT / f"predictions/segformer_b5_{N_CLASSES}cls"
 DINOV3_CACHE = TEST_ROOT / f"predictions/dinov3_vitl_dpt_{N_CLASSES}cls"
 MODEL_ORDER = ("yolo", "yolo_seg", "segformer", "dinov3")
@@ -63,7 +63,7 @@ SEG_CONF = 0.25
 
 def score_map(cm: np.ndarray) -> dict:
     iou = {}
-    for class_id, name in enumerate(V2_CLASSES):
+    for class_id, name in enumerate(CLASSES):
         tp = int(cm[class_id, class_id])
         union = int(cm[class_id].sum() + cm[:, class_id].sum() - tp)
         iou[name] = (tp / union) if union else None
@@ -115,8 +115,8 @@ def project_ids_from_labels(labels_by_id: dict[int, str], num_model_classes: int
         if index == 0 or not name or name.lower() in {"void", "unlabeled"}:
             ids.append(PRED_IGNORE)
             continue
-        project_name = v2_name_to_class(name)
-        ids.append(V2_TO_ID[project_name] if project_name else PRED_IGNORE)
+        project_name = raw_name_to_class(name)
+        ids.append(CLASS_TO_ID[project_name] if project_name else PRED_IGNORE)
     return ids
 
 
@@ -125,7 +125,7 @@ def check_project_ids(ids: list[int], model_name: str) -> None:
     reachable = set(ids) - {PRED_IGNORE}
     missing = set(range(N_CLASSES)) - reachable
     if missing:
-        names = [V2_CLASSES[index] for index in sorted(missing)]
+        names = [CLASSES[index] for index in sorted(missing)]
         raise RuntimeError(f"{model_name} label fold cannot reach project classes: {names}")
 
 
@@ -263,7 +263,7 @@ def run_segformer(pairs: list[tuple[Path, Path]], raw_to_project: dict) -> dict:
     # Check that the model taxonomy and ground-truth taxonomy use the same
     # spelling for every shared CoralscapesV2 class name.
     model_names = {str(v).strip().lower() for k, v in model.config.id2label.items() if str(k) != "0"}
-    data_names = {name.strip().lower() for name in load_v2_labels(DATA_LABELS).values() if name.strip().lower() != "unlabeled"}
+    data_names = {name.strip().lower() for name in load_raw_labels(DATA_LABELS).values() if name.strip().lower() != "unlabeled"}
     if model_names != data_names:
         raise RuntimeError("SegFormer and dataset id2label names differ; refusing ID-based comparison")
 
@@ -329,7 +329,7 @@ def run_dinov3(pairs: list[tuple[Path, Path]], raw_to_project: dict,
         torch.cuda.empty_cache()
     model, processor = load_dinov3_dpt(DINOV3_PATH, device=str(device))
     labels = load_id2label(DINOV3_PATH)
-    dataset_labels = load_v2_labels(DATA_LABELS)
+    dataset_labels = load_raw_labels(DATA_LABELS)
     normalised = {index: name.strip().lower() for index, name in labels.items()}
     if normalised != {index: name.strip().lower() for index, name in dataset_labels.items()}:
         raise RuntimeError("DINOv3 and dataset id2label names differ; refusing ID-based comparison")
@@ -410,8 +410,8 @@ def main() -> None:
         )
 
     pairs = dataset_paths()
-    labels = load_v2_labels(DATA_LABELS)
-    raw_to_project = make_v2_to_project(labels)
+    labels = load_raw_labels(DATA_LABELS)
+    raw_to_project = make_raw_to_project(labels)
     runners = {
         "yolo": lambda: run_yolo(pairs, raw_to_project),
         "yolo_seg": lambda: run_yolo_seg(pairs, raw_to_project),
@@ -424,8 +424,8 @@ def main() -> None:
         "split": "official test",
         "images": len(pairs),
         "image_shape": [1024, 2048],
-        "project_classes": V2_CLASSES,
-        "ground_truth_mapping": "Raw CoralscapesV2 ids are mapped by class name using src/data/v2_label_map.py and configs/labels.yaml; unmapped GT pixels (255) are excluded.",
+        "project_classes": CLASSES,
+        "ground_truth_mapping": "Raw CoralscapesV2 ids are mapped by class name using src/data/label_map.py and configs/labels.yaml; unmapped GT pixels (255) are excluded.",
         "metric_definition": "Pixel accuracy and macro IoU over valid GT pixels; predictions falling in void/ignored categories count as incorrect. Macro IoU averages classes with nonzero union.",
         "models": models,
     }

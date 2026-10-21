@@ -1,4 +1,4 @@
-"""Download the two public pretrained CoralscapesV2 backbones.
+"""Download the two public pretrained Coralscapes backbones.
 
 They are too large for git (~1.6 GB together), so only the fine-tuned
 checkpoints in ``models/checkpoints`` are versioned (with Git LFS). This script

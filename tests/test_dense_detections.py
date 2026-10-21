@@ -23,7 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from src.inference.pipeline import detections_from_class_map
 from src.trust.reliability import review_decision
 
-CLASSES = ["coral_alive", "coral_bleached", "dead_coral", "algae",
+CLASSES = ["coral_alive", "coral_bleached", "coral_dead", "algae",
            "hard_substrate", "sand", "non_reef"]
 
 
@@ -72,7 +72,7 @@ def test_confidence_is_component_mean() -> None:
 def test_small_components_are_dropped() -> None:
     class_map, confidence = synthetic_map()
     dets = detections_from_class_map(class_map, confidence, CLASSES)
-    assert "dead_coral" not in {det["class"] for det in dets}
+    assert "coral_dead" not in {det["class"] for det in dets}
 
 
 def test_max_detections_is_respected() -> None:

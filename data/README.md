@@ -1,49 +1,43 @@
 # Data
 
-All data is git-ignored except this README. The folder is organised into tiers:
+All dataset, processed, and evaluation files are git-ignored; this README is tracked.
 
-| Tier | Purpose | Rebuildable? |
+| Folder | Purpose | Retention |
 |---|---|---|
-| `raw/` | Immutable downloads (HF snapshots, external datasets) | Re-download with pinned revision |
-| `interim/` | Scratch conversions | Yes, delete freely |
-| `processed/` | Model-ready datasets (YOLO format) | Yes, via `main.py prepare` / `prepare-v2` |
-| `eval/` | Fixed benchmark fixtures (images, masks, predictions) | Frozen; version before comparing |
-| `cache/` | HF/torch download cache | Yes |
+| `raw/` | Original dataset downloads and demo media | Keep source data unchanged; record revision and licence. |
+| `processed/` | 7-class YOLO data generated from CoralscapesV2 | Rebuildable with `main.py prepare`. |
+| `eval/coralscapesv2-test/` | Fixed 473-image benchmark fixture used by the four-backend evaluator | Treat as frozen during comparisons. |
+| `eval/predictions/` | Cached prediction maps keyed by model and taxonomy | Disposable; safe to remove and regenerate. |
 
-## Contents
+## Current data
 
-- `raw/coralscapes_hf/` — V1 Coralscapes HF snapshot (Parquet)
-- `raw/coralscapes_v2/` — V2 CoralscapesV2 HF snapshot (optional, ~6.75 GB)
-- `raw/lter_mcr/` — MCR-LTER labeled corals dataset
-- `raw/video_10624794/` — ROV/video dataset (DeepReefMap-style)
-- `raw/clips/` — Loose video clips for inference testing
-- `processed/v1_yolo/` — V1 7-class YOLO segmentation dataset
-- `processed/v1_condition_crops/` — V1 condition classifier crops
-- `processed/v2_yolo/` — V2 7-class project-taxonomy YOLO dataset (built by `prepare-v2`)
-- `eval/coralscapesv2-test/` — 473-image official test split + id2label
-- `eval/predictions/` — Cached prediction maps keyed by model version
+- `raw/coralscapes_hf/` contains the original Coralscapes dataset. It is a historical local snapshot and does not use the 95-class CoralscapesV2 mapping expected by the current preparation workflow.
+- `raw/coralscapes_v2/` is the expected local download location for the CoralscapesV2 Parquet snapshot. The dataset is not currently downloaded there; obtain it from `josauder/coralscapesV2` before running local preparation.
+- `eval/coralscapesv2-test/` contains the image/mask pairs and `id2label.json` required by `scripts/evaluate_model_comparison.py`.
+- `raw/lter_mcr/`, `raw/video_10624794/`, and `raw/clips/` contain supporting reference data or demo media; they are not inputs to the current model training/evaluation workflow.
 
-## Rebuild commands
+## Rebuild and evaluate
+
+The preparation command expects `id2label.json` at the snapshot root and Parquet shards under `data/`, with `train-*`, `validation-*`, and `test-*` splits.
 
 ```bash
-# V1 dataset
-python main.py prepare --root data/raw/coralscapes_hf --out data/processed/v1_yolo
-
-# V2 dataset
-python main.py prepare-v2 --root data/raw/coralscapes_v2 --out data/processed/v2_yolo
-
-# V1 evaluation
-python main.py evaluate --manifest data/processed/v1_yolo/manifest.csv \
-  --raw-classes data/processed/v1_yolo/classes.json
-
-# V2 evaluation
-python main.py evaluate-v2 --manifest data/processed/v2_yolo/manifest.csv \
-  --raw-classes data/raw/coralscapes_v2/id2label.json
+python main.py prepare --root data/raw/coralscapes_v2 --out data/processed/yolo
 ```
+
+Evaluate the prepared test split with the project taxonomy:
+
+```bash
+python main.py evaluate \
+  --model models/checkpoints/yolo26n_sem/weights/best.pt \
+  --manifest data/processed/yolo/manifest.csv \
+  --raw-classes data/raw/coralscapes_v2/id2label.json \
+  --out reports/eval_metrics.json
+```
+
+The reproducible four-backend benchmark uses the frozen fixture under `eval/coralscapesv2-test/` and is run with `scripts/evaluate_model_comparison.py`.
 
 ## Retention
 
-- `raw/` is the only irreplaceable tier — keep pinned revisions.
-- `processed/` and `cache/` are disposable; delete to reclaim space.
-- `eval/` is frozen; never regenerate in place during a model comparison.
-- `predictions/` is a cache keyed by `<model-version>`; safe to delete.
+- Keep raw inputs immutable and preserve their source/licence metadata.
+- `processed/` and `eval/predictions/` can be rebuilt or deleted.
+- Do not regenerate `eval/coralscapesv2-test/` in place during a model comparison.

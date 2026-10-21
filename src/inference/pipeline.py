@@ -10,26 +10,15 @@ import numpy as np
 import torch
 from ultralytics import YOLO
 
-from src.data.label_map import BROAD_CLASSES
+from src.data.label_map import CLASSES, CLASS_TO_ID, raw_name_to_class, EXCLUDED_FROM_HEALTH
 from src.data.quality import assess_image
 from src.trust.reliability import prediction_uncertainty, review_decision
-from src.data.v2_label_map import V2_CLASSES, V2_TO_ID, v2_name_to_class
 
-LEGACY_COLORS = np.array([
-    [70, 170, 70],    # coral_alive (green)
-    [255, 230, 80],   # coral_bleached (yellow)
-    [150, 80, 80],    # coral_dead (dark red/brown)
-    [50, 160, 50],    # algae (forest green)
-    [150, 120, 70],   # rubble (brown)
-    [190, 170, 120],  # sand_rock (sand)
-    [120, 120, 120],  # other (gray)
-], dtype=np.uint8)
-
-# BGR colours for the project 7-class taxonomy (configs/labels.yaml).
-PROJECT_COLORS = np.array([
+# BGR colours for the 7-class taxonomy (configs/labels.yaml).
+CLASS_COLORS = np.array([
     [70, 170, 70],    # 0 coral_alive (green)
     [255, 230, 80],   # 1 coral_bleached (white/yellow)
-    [150, 80, 80],    # 2 dead_coral (dark red/brown)
+    [150, 80, 80],    # 2 coral_dead (dark red/brown)
     [0, 160, 120],    # 3 algae (moss/olive green)
     [140, 130, 120],  # 4 hard_substrate (slate stone/rubble)
     [194, 178, 128],  # 5 sand (sand beige)
@@ -37,8 +26,7 @@ PROJECT_COLORS = np.array([
 ], dtype=np.uint8)
 
 # Scene classes that are predicted but removed from the reef health denominator.
-# "other"/"background" keep legacy checkpoints consistent with non_reef discard sink.
-_HEALTH_EXCLUDED = {"non_reef", "other_benthic", "other", "seagrass", "background"}
+_HEALTH_EXCLUDED = set(EXCLUDED_FROM_HEALTH)
 
 # Live-cover tiers, best to worst (Reef Check / Gomez et al. benchmark).
 _TIER_ORDER = ("Excellent", "Good", "Fair", "Poor / Degraded")
@@ -46,8 +34,7 @@ _TIER_ORDER = ("Excellent", "Good", "Fair", "Poor / Degraded")
 # Coral-condition disturbances cap the cover tier: a bleached or dead
 # assemblage must not be reported as healthier than its condition allows.
 # Level 1 (>=10% of coral affected) caps at Good, level 2 (>=25%) at Fair and
-# level 3 (>=50%) at Poor / Degraded. The unmodified cover tier stays available
-# as ``live_cover_tier`` for callers that want the classic cover-only index.
+# level 3 (>=50%) at Poor / Degraded.
 _CONDITION_CAPS = {0: None, 1: "Good", 2: "Fair", 3: "Poor / Degraded"}
 
 
@@ -70,12 +57,9 @@ def _reef_health_verdict(lcc: float, bleaching_ratio: float, mortality_ratio: fl
                          algae_cover: float, has_reef: bool) -> tuple[str, str, str | None, str | None]:
     """Combine the live-cover tier with coral condition.
 
-    Shared by the per-image and per-video paths so frame-level and survey-level
-    verdicts can never disagree about the rule. Returns
-    ``(category, cover_tier, condition, condition_cap)``; ``condition`` is
+    Returns ``(category, cover_tier, condition, condition_cap)``; ``condition`` is
     ``None`` only when no reef area was detected.
     """
-    # Standard ecological condition tiers (Reef Check / Gomez et al. benchmark)
     if not has_reef:
         indeterminate = "Indeterminate (No reef area detected)"
         return indeterminate, indeterminate, None, None
@@ -111,43 +95,32 @@ def compute_health_indicators(counts: dict[str, int], total_valid: int) -> dict:
     """Compute quantitative reef health metrics from segmented benthic pixels.
 
     Ratios use the *reef* area as the denominator: scene classes excluded from
-    the reef assessment (``non_reef`` and legacy discard sinks) are subtracted from
+    the reef assessment (``non_reef`` and discard sinks) are subtracted from
     ``total_valid`` first, so water, fish, or transect hardware cannot inflate
     or deflate coral cover.
 
     ``reef_health_category`` combines two axes: the live-coral-cover tier
     (Reef Check / Gomez) and the coral-condition severity (bleaching and
     mortality as a share of all coral). Condition can only *lower* the tier,
-    never raise it, so a 60%-bleached reef with 60% live cover is reported as
-    ``Poor / Degraded [Extensive Bleaching]`` rather than ``Excellent``.
-    The cover-only tier remains in ``live_cover_tier``.
+    never raise it. The cover-only tier remains in ``live_cover_tier``.
     """
     norm = {str(name).lower(): int(value) for name, value in counts.items()}
 
     def pct(value: int, denominator: int) -> float:
         return round(value / denominator * 100.0, 2) if denominator > 0 else 0.0
 
-    def coral_by_state(state: str) -> int:
-        # Matches the project classes ("coral_alive") and legacy
-        # morphology-prefixed names ("branching_coral_alive").
-        return sum(value for name, value in norm.items()
-                   if name == f"coral_{state}" or name.endswith(f"_coral_{state}"))
-
-    live = coral_by_state("alive")
-    bleached = coral_by_state("bleached")
-    dead = coral_by_state("dead") + norm.get("dead_coral", 0)
-    unknown_coral = norm.get("coral_condition_unknown", 0)
-    algae = sum(value for name, value in norm.items() if "algae" in name)
-    rubble = norm.get("rubble", 0)
-    sand = norm.get("sand", 0) + norm.get("sand_rock", 0)
-    hard_substrate = norm.get("hard_substrate", 0) + rubble
-    other_benthic = norm.get("other_benthic", 0)
+    live = norm.get("coral_alive", 0)
+    bleached = norm.get("coral_bleached", 0)
+    dead = norm.get("coral_dead", 0)
+    algae = norm.get("algae", 0)
+    hard_substrate = norm.get("hard_substrate", 0)
+    sand = norm.get("sand", 0)
     non_reef = norm.get("non_reef", 0)
 
     excluded = sum(norm.get(name, 0) for name in _HEALTH_EXCLUDED)
     reef_total = int(total_valid) - excluded
 
-    total_coral = live + bleached + dead + unknown_coral
+    total_coral = live + bleached + dead
     bleaching_ratio = pct(bleached, total_coral)
     mortality_ratio = pct(dead, total_coral)
     lcc = pct(live, reef_total)
@@ -160,24 +133,18 @@ def compute_health_indicators(counts: dict[str, int], total_valid: int) -> dict:
     return {
         "live_coral_cover_pct": lcc,
         "bleached_coral_cover_pct": pct(bleached, reef_total),
-        "dead_coral_cover_pct": pct(dead, reef_total),
+        "coral_dead_cover_pct": pct(dead, reef_total),
         "algae_covered_cover_pct": algae_cover,
         "macroalgae_cover_pct": algae_cover,
-        "rubble_cover_pct": pct(rubble, reef_total),
-        "sand_rock_cover_pct": pct(sand, reef_total),
         "hard_substrate_cover_pct": pct(hard_substrate, reef_total),
+        "sand_cover_pct": pct(sand, reef_total),
         "total_coral_cover_pct": pct(total_coral, reef_total),
         "bleaching_ratio_pct": bleaching_ratio,
         "mortality_ratio_pct": mortality_ratio,
         "coral_to_algae_ratio": round(live / algae, 2) if algae > 0 else 0.0,
-        "coral_condition_unknown_pct": pct(unknown_coral, reef_total),
-        # Scene classes are reported over all recognised pixels, not the reef area.
-        "other_benthic_cover_pct": pct(other_benthic, total_valid),
         "non_reef_cover_pct": pct(non_reef, total_valid),
         "reef_area_pixels": max(reef_total, 0),
         "excluded_area_pixels": excluded,
-        # Combined verdict (cover tier capped by coral condition), the cover-only
-        # tier it started from, and the named condition(s) that capped it.
         "reef_health_category": cat,
         "live_cover_tier": cover_tier,
         "coral_condition": condition,
@@ -186,9 +153,8 @@ def compute_health_indicators(counts: dict[str, int], total_valid: int) -> dict:
 
 
 # Dense backends answer "which class is this pixel", not "which colony is this".
-# Boxes are therefore region boxes around connected coral areas, drawn only for
-# coral classes so substrate classes do not bury the overlay in rectangles.
-BOX_CLASSES = ("coral_alive", "coral_bleached", "dead_coral")
+# Boxes are drawn around connected coral areas.
+BOX_CLASSES = ("coral_alive", "coral_bleached", "coral_dead")
 
 
 def detections_from_class_map(
@@ -203,12 +169,7 @@ def detections_from_class_map(
     """Turn a dense class map into drawable region boxes for coral classes.
 
     Each connected component of a coral class becomes one detection, keeping the
-    largest ``max_detections``. Components whose bounding box is mostly empty
-    (``fill_ratio`` below ``min_fill_ratio``, e.g. a thin bleaching band along a
-    colony margin) are skipped: their box would be a long line across the frame
-    rather than a usable region. Confidence is the mean pixel probability inside
-    the component's bounding box for that class, or ``None`` when the backend
-    exposes no probabilities. These are display boxes, not per-colony annotations.
+    largest ``max_detections``.
     """
     height, width = class_map.shape
     min_area = max(64, int(round(height * width * min_area_frac)))
@@ -227,8 +188,6 @@ def detections_from_class_map(
             if area / float(max(1, box_w * box_h)) < min_fill_ratio:
                 continue
             if (box_w * box_h) / float(height * width) > max_box_frac:
-                # Merged region spanning a large part of the frame: the mask
-                # already shows it, a frame-sized rectangle only adds clutter.
                 continue
             score = None
             if confidence_map is not None:
@@ -249,7 +208,7 @@ def detections_from_class_map(
 
 
 class CoralPipeline:
-    def __init__(self, model_path: str | Path, condition_model_path: str | Path | None = None,
+    def __init__(self, model_path: str | Path = "models/checkpoints/yolo26n_sem/weights/best.pt",
                  imgsz: int = 512, conf: float = 0.20, thresholds: dict | None = None,
                  model_type: str = "yolo"):
         self.model_path = str(model_path)
@@ -258,32 +217,29 @@ class CoralPipeline:
         self.thresholds = thresholds
         self.model_type = model_type
         self.model = None
-        # Dense backends report the mean probability of the chosen class, which
-        # lives in a different range from YOLO detection confidence. These
-        # floors come from the 473-image test split (1st percentile 0.73-0.86
-        # for mean confidence, max normalised entropy 0.26), so an in-distribution
-        # image passes while a degraded one is still flagged.
+        self.class_names = CLASSES
+        self.colors = CLASS_COLORS
+
         if thresholds is None and model_type in {"segformer", "dinov3"}:
             self.thresholds = {"confidence": 0.70, "uncertainty": 0.40}
+
         if model_type == "segformer":
             from transformers import SegformerForSemanticSegmentation, SegformerImageProcessor
 
             self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
             self.model = SegformerForSemanticSegmentation.from_pretrained(self.model_path).to(self.device).eval()
             self.processor = SegformerImageProcessor.from_pretrained(self.model_path)
-            self.class_names = V2_CLASSES
             self.model_task = "semantic"
             self._dense_project_ids = []
             for index in range(self.model.config.num_labels):
                 name = str(self.model.config.id2label[index]).strip()
-                project_class = None if index == 0 or name.lower() in {"void", "unlabeled"} else v2_name_to_class(name)
-                self._dense_project_ids.append(V2_TO_ID[project_class] if project_class else len(V2_CLASSES))
+                project_class = None if index == 0 or name.lower() in {"void", "unlabeled"} else raw_name_to_class(name)
+                self._dense_project_ids.append(CLASS_TO_ID[project_class] if project_class else len(CLASSES))
         elif model_type == "dinov3":
             from src.inference.dinov3_dpt import dinov3_project_ids, load_dinov3_dpt, load_id2label
 
             self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
             self.model, self.processor = load_dinov3_dpt(self.model_path, device=str(self.device))
-            self.class_names = V2_CLASSES
             self.model_task = "semantic"
             num_labels = int(json.loads((Path(self.model_path) / "config.json").read_text())["num_classes"])
             self._dense_project_ids = dinov3_project_ids(load_id2label(self.model_path), num_labels)
@@ -294,42 +250,6 @@ class CoralPipeline:
             self.class_names = [model_names[i] for i in range(len(model_names))] if isinstance(model_names, dict) else list(model_names)
         else:
             raise ValueError(f"Unsupported model_type: {model_type}")
-        if self.class_names == BROAD_CLASSES:
-            self.colors = LEGACY_COLORS
-        elif self.class_names == V2_CLASSES:
-            self.colors = PROJECT_COLORS
-        else:
-            palette = cv2.applyColorMap(np.arange(max(1, len(self.class_names)), dtype=np.uint8).reshape(-1, 1), cv2.COLORMAP_TURBO)
-            self.colors = palette[:, 0].copy()
-
-        # Optional condition classifier (ResNet18) for crop-level verification
-        self.condition_model = None
-        self.condition_classes = []
-        cond_path = Path(condition_model_path) if condition_model_path else Path("models/checkpoints/condition_resnet18.pt")
-        if not condition_model_path and self.class_names != BROAD_CLASSES:
-            cond_path = Path("__disabled_for_nonlegacy_taxonomy__")
-        if cond_path.exists():
-            try:
-                from torchvision import models
-                from torchvision import transforms
-                device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-                ckpt = torch.load(cond_path, map_location=device, weights_only=False)
-                classes = ckpt.get("classes", ["coral_alive", "coral_bleached", "coral_dead"])
-                net = models.resnet18(weights=None)
-                net.fc = torch.nn.Linear(net.fc.in_features, len(classes))
-                net.load_state_dict(ckpt["state_dict"])
-                net.to(device).eval()
-                self.condition_model = net
-                self.condition_classes = classes
-                self.condition_device = device
-                self.condition_transform = transforms.Compose([
-                    transforms.ToPILImage(),
-                    transforms.Resize((128, 128)),
-                    transforms.ToTensor(),
-                    transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
-                ])
-            except Exception as e:
-                self.condition_model = None
 
     def infer(self, image_or_path: str | Path | np.ndarray,
               save_overlay: str | Path | None = None,
@@ -362,7 +282,6 @@ class CoralPipeline:
         class_map = np.full((height, width), -1, dtype=np.int16)
         confidence_map = np.zeros((height, width), dtype=np.float32)
         detections = []
-        crop_evaluations = []
 
         if semantic_output is not None:
             if isinstance(semantic_output, np.ndarray):
@@ -374,8 +293,6 @@ class CoralPipeline:
             recognized = (semantic_map >= 0) & (semantic_map < len(self.class_names))
             class_map[recognized] = semantic_map[recognized]
             if semantic_confidence is not None:
-                # Dense transforms can resample the confidence map; keep it in
-                # the same pixel grid as the class map.
                 if semantic_confidence.shape != (height, width):
                     semantic_confidence = cv2.resize(
                         semantic_confidence, (width, height), interpolation=cv2.INTER_LINEAR
@@ -401,31 +318,9 @@ class CoralPipeline:
                     "pixels": int(mask_full.sum()),
                     "bbox": [int(x1), int(y1), int(x2), int(y2)],
                 }
-
-                # If this is a coral detection and we have the condition classifier, classify crop
-                if self.condition_model is not None and "coral" in cls_name:
-                    bx1, by1 = max(0, int(x1)), max(0, int(y1))
-                    bx2, by2 = min(width, int(x2)), min(height, int(y2))
-                    if (bx2 - bx1) >= 16 and (by2 - by1) >= 16:
-                        crop_rgb = cv2.cvtColor(image[by1:by2, bx1:bx2], cv2.COLOR_BGR2RGB)
-                        inp = self.condition_transform(crop_rgb).unsqueeze(0).to(self.condition_device)
-                        with torch.no_grad():
-                            logits = self.condition_model(inp)
-                            probs = torch.softmax(logits, dim=-1).cpu().numpy()[0]
-                            pred_idx = int(probs.argmax())
-                            pred_cond = self.condition_classes[pred_idx]
-                            det_info["condition_crop_pred"] = pred_cond
-                            det_info["condition_crop_confidence"] = float(probs[pred_idx])
-                            crop_evaluations.append({
-                                "detection_id": idx,
-                                "predicted_condition": pred_cond,
-                                "probabilities": {c: float(p) for c, p in zip(self.condition_classes, probs)},
-                            })
-
                 detections.append(det_info)
 
-        # Dense backends emit a class map, not detections: derive region boxes
-        # for the coral classes so the overlay still shows where coral is.
+        # Dense backends emit a class map: derive region boxes for coral classes
         if semantic_output is not None:
             detections = detections_from_class_map(
                 class_map,
@@ -436,19 +331,14 @@ class CoralPipeline:
         valid = class_map >= 0
         total_valid = int(valid.sum())
         counts = {name: int((class_map == i).sum()) for i, name in enumerate(self.class_names)}
-        # Confidence is only meaningful when the backend produced scores.
         scores_available = semantic_confidence is not None or (semantic_output is None and bool(detections))
         mean_conf = float(confidence_map[valid].mean()) if (valid.any() and scores_available) else None
-        # Coverage counts assessable reef/benthic area only. The non_reef sink
-        # (water, fish, humans, transect hardware) must not inflate it.
-        excluded = sum(counts.get(name, 0) for name in ("non_reef", "background"))
+        excluded = sum(counts.get(name, 0) for name in _HEALTH_EXCLUDED)
         coverage = max(0, total_valid - excluded) / float(width * height)
 
         if dense_uncertainty is not None:
             uncertainty = dense_uncertainty
         elif semantic_output is not None:
-            # Semantic checkpoint without probabilities (YOLO26n-sem): the gate
-            # cannot score uncertainty, so it must not invent a failure for it.
             uncertainty = None
         else:
             uncertainty = prediction_uncertainty([d["confidence"] for d in detections])
@@ -462,17 +352,13 @@ class CoralPipeline:
 
         if save_overlay or return_overlay:
             overlay = image.copy()
-            # Semi-transparent mask overlays
             for cls_idx, color in enumerate(self.colors):
                 sel = class_map == cls_idx
                 if sel.any():
                     overlay[sel] = (0.55 * overlay[sel] + 0.45 * color).astype(np.uint8)
 
-            # Draw bounding boxes with class + confidence labels
             fs = max(0.45, min(1.2, width / 1200.0))
             bt = max(1, int(round(width / 600)))
-            # Reserve the HUD's top-left area (drawn last, semi-transparent) so
-            # labels never sit underneath it.
             label_rects: list[tuple[int, int, int, int]] = [
                 (0, 0, max(420, int(width * 0.42)), int((int(22 * fs) + 8) * 6 + 16))
             ]
@@ -489,14 +375,8 @@ class CoralPipeline:
 
                 cv2.rectangle(overlay, (x1, y1), (x2, y2), color, bt)
                 label = cls_name if det["confidence"] is None else f"{cls_name} {det['confidence']:.2f}"
-                if "condition_crop_pred" in det:
-                    label += f" [{det['condition_crop_pred'][:5]}]"
                 pending_labels.append((label, color, (x1, y1, x2, y2)))
 
-            # Labels go on after every rectangle, so a later box border can never
-            # cut through an earlier label. Region boxes from a dense map are
-            # numerous, so their labels are smaller and are placed only where they
-            # do not collide with an earlier label or the HUD (the box always stays).
             label_fs = fs * 0.7 if semantic_output is not None else fs
             for label, color, (x1, y1, x2, y2) in pending_labels:
                 (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, label_fs, bt)
@@ -518,8 +398,6 @@ class CoralPipeline:
             status_text = decision["status"].upper()
             status_color = (60, 180, 60) if decision["status"] == "accepted" else (40, 100, 220)
 
-            # The verdict can carry long condition reasons, so the tier and the
-            # capped condition get separate rows instead of one clipped line.
             tier_text, _, reasons_text = health["reef_health_category"].partition(" [")
             hud_lines = [f"REEF HEALTH: {tier_text}"]
             if reasons_text:
@@ -540,8 +418,6 @@ class CoralPipeline:
 
             for i, line in enumerate(hud_lines):
                 c = status_color if i == status_row else (255, 255, 255)
-                # Shrink a row that would overflow narrow frames (e.g. a 640-px
-                # image with a long condition string) rather than clipping it.
                 scale = fs
                 while scale > 0.4:
                     (tw, _), _ = cv2.getTextSize(line, cv2.FONT_HERSHEY_SIMPLEX, scale, bt)
@@ -575,8 +451,6 @@ class CoralPipeline:
             "benthic_composition": proportions,
             "detections_count": len(detections),
             "detections": detections,
-            "condition_classifier_evaluated": len(crop_evaluations) > 0,
-            "crop_evaluations": crop_evaluations,
             "reliability": decision,
             "overlay": str(save_overlay) if save_overlay else None,
         }
@@ -585,21 +459,12 @@ class CoralPipeline:
         return report
 
     def _fold_project_map(self, logits, height: int, width: int) -> tuple[np.ndarray, np.ndarray, float]:
-        """Fold fine label logits into project classes.
-
-        Returns ``(class_map, per_pixel_confidence, mean_normalized_entropy)``.
-        ``confidence`` is the probability of the chosen project class (including
-        the void sink), and the entropy is averaged over pixels that received a
-        project class. Both are needed by the reliability gate: without them a
-        dense backend has no confidence signal and every image lands in review.
-        """
+        """Fold fine label logits into project classes."""
         import math
-
-        import torch.nn.functional as F
 
         probabilities = logits.float().softmax(dim=1)
         grouped = torch.zeros(
-            (1, len(V2_CLASSES) + 1, *probabilities.shape[-2:]),
+            (1, len(CLASSES) + 1, *probabilities.shape[-2:]),
             dtype=probabilities.dtype,
             device=probabilities.device,
         )
@@ -610,19 +475,17 @@ class CoralPipeline:
             probabilities,
         )
 
-        # Fine labels mapped to void leave the grouped distribution unnormalised.
         normalised = grouped / grouped.sum(dim=1, keepdim=True).clamp_min(1e-6)
         confidence, prediction = grouped.max(dim=1)
-        # Normalised Shannon entropy over the project classes + void sink.
         log_p = normalised.clamp_min(1e-8).log()
         entropy = -(normalised * log_p).sum(dim=1) / math.log(grouped.shape[1])
         del probabilities, grouped, normalised, log_p
 
-        recognised = prediction != len(V2_CLASSES)
+        recognised = prediction != len(CLASSES)
         uncertainty = float(entropy[recognised].mean()) if bool(recognised.any()) else 1.0
 
         project_map = prediction[0].to("cpu").to(torch.uint8).numpy()
-        project_map[project_map == len(V2_CLASSES)] = 255
+        project_map[project_map == len(CLASSES)] = 255
         confidence_map = confidence[0].float().to("cpu").numpy()
         return (
             cv2.resize(project_map, (width, height), interpolation=cv2.INTER_NEAREST),
@@ -631,7 +494,7 @@ class CoralPipeline:
         )
 
     def _predict_segformer(self, image_bgr: np.ndarray) -> tuple[np.ndarray, np.ndarray, float]:
-        """Return project-class IDs, pixel confidence and entropy (single-pass protocol)."""
+        """Return project-class IDs, pixel confidence and entropy from SegFormer."""
         import torch.nn.functional as F
 
         height, width = image_bgr.shape[:2]
@@ -639,17 +502,13 @@ class CoralPipeline:
         image_rgb = cv2.resize(image_rgb, (1376, 768), interpolation=cv2.INTER_LINEAR)
         inputs = self.processor(image_rgb, return_tensors="pt")
         inputs = {key: value.to(self.device) for key, value in inputs.items()}
-        # Keep this model in FP32. On the local app environment, CUDA FP16
-        # autocast produces NaN logits for this checkpoint and collapses the
-        # project-class map to class 0.
         with torch.inference_mode():
             logits = self.model(**inputs).logits
-            # SegFormer emits logits at 1/4 resolution; fold at full input size.
             logits = F.interpolate(logits.float(), size=(768, 1376), mode="bilinear", align_corners=False)
         return self._fold_project_map(logits, height, width)
 
     def _predict_dinov3(self, image_bgr: np.ndarray) -> tuple[np.ndarray, np.ndarray, float]:
-        """Return project-class IDs, pixel confidence and entropy from a DINOv3 + DPT checkpoint."""
+        """Return project-class IDs, pixel confidence and entropy from DINOv3 + DPT."""
         from PIL import Image as PILImage
 
         height, width = image_bgr.shape[:2]
@@ -739,7 +598,7 @@ class CoralPipeline:
 
 
 def aggregate_reports(reports: list[dict]) -> dict:
-    """Aggregate frame-level reports into a video/survey-level health assessment."""
+    """Aggregate frame-level reports into a survey-level health assessment."""
     if not reports:
         return {"status": "needs_review", "reason": "no_frames", "health_indicators": {}}
 
@@ -752,7 +611,6 @@ def aggregate_reports(reports: list[dict]) -> dict:
         for name in composition_names
     }
 
-    # Aggregate health metrics
     mean_lcc = float(np.mean([r["health_indicators"]["live_coral_cover_pct"] for r in pool]))
     mean_bleached = float(np.mean([r["health_indicators"]["bleached_coral_cover_pct"] for r in pool]))
     mean_algae = float(np.mean([
@@ -762,7 +620,6 @@ def aggregate_reports(reports: list[dict]) -> dict:
     mean_bleaching_ratio = float(np.mean([r["health_indicators"]["bleaching_ratio_pct"] for r in pool]))
     mean_mortality_ratio = float(np.mean([r["health_indicators"]["mortality_ratio_pct"] for r in pool]))
 
-    # Same verdict rule as the single-image path: cover tier capped by condition.
     overall_cat, overall_cover_tier, overall_condition, _ = _reef_health_verdict(
         mean_lcc, mean_bleaching_ratio, mean_mortality_ratio, mean_algae, True
     )

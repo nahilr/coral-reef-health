@@ -33,8 +33,6 @@ for checkpoint in sorted((REPO_ROOT / "models/checkpoints").glob("**/best.pt")):
     rel_path = checkpoint.relative_to(REPO_ROOT).as_posix()
     model_choices[rel_path] = str(checkpoint)
 
-# Hugging Face Transformers checkpoints are directories containing config and
-# weights, so expose the model directory as one selectable artifact.
 for config_path in sorted((REPO_ROOT / "models/pretrained").glob("*/config.json")):
     model_dir = config_path.parent
     if any(model_dir.glob("*.safetensors")) or any(model_dir.glob("pytorch_model*.bin")):
@@ -45,13 +43,13 @@ if not model_choices:
     st.sidebar.error("No model checkpoints found under models/checkpoints or models/pretrained.")
     st.stop()
 
-preferred_model = "models/checkpoints/yolo26n_sem_v2/weights/best.pt"
+preferred_model = "models/checkpoints/yolo26n_sem/weights/best.pt"
 default_model = preferred_model if preferred_model in model_choices else next(iter(model_choices))
 selected_model_file = st.sidebar.selectbox(
-    "Model file",
+    "Model architecture",
     options=list(model_choices),
     index=list(model_choices).index(default_model),
-    help="Choose a trained checkpoint. SegFormer is listed by its model folder because it uses multiple files.",
+    help="Select an inference model. SegFormer and DINOv3 are directories; YOLO models are weights files.",
 )
 model_path = model_choices[selected_model_file]
 if Path(model_path).is_dir():
@@ -60,33 +58,18 @@ else:
     model_type = "yolo"
 
 if model_type == "dinov3":
-    st.sidebar.caption("Strongest published CoralscapesV2 model (DINOv3 ViT-L + DPT); uses more memory and runs slower.")
+    st.sidebar.caption("High-precision foundation model (DINOv3 ViT-L + DPT).")
 elif model_type == "segformer":
-    st.sidebar.caption("Published CoralscapesV2 SegFormer-B5; uses more memory and runs slower.")
+    st.sidebar.caption("Transformer benchmark (SegFormer-B5).")
 else:
-    if "yolo26n_sem_v2" in model_path:
-        st.sidebar.caption("Fastest in our comparison (0.10 s/image); dense semantic masks on the project taxonomy (no per-colony boxes).")
-
-condition_choices: dict[str, str | None] = {"Disabled": None}
-for checkpoint in sorted((REPO_ROOT / "models/checkpoints").glob("**/condition*.pt")):
-    rel_path = checkpoint.relative_to(REPO_ROOT).as_posix()
-    condition_choices[rel_path] = str(checkpoint)
-default_condition = "models/checkpoints/condition_resnet18.pt"
-if default_condition not in condition_choices:
-    default_condition = "Disabled"
-selected_condition = st.sidebar.selectbox(
-    "Condition classifier file",
-    options=list(condition_choices),
-    index=list(condition_choices).index(default_condition),
-    help="Optional crop classifier for live, bleached, and dead coral. It needs coral detections from an instance segmentation model.",
-)
-condition_model_path = condition_choices[selected_condition] or ""
-if condition_model_path and (model_type in {"segformer", "dinov3"} or "yolo26n_sem_v2" in model_path):
-    st.sidebar.caption("This model produces semantic masks without coral bounding boxes, so the crop classifier will not run for this selection.")
+    if "yolo26n_sem" in model_path:
+        st.sidebar.caption("Real-time edge semantic model (~38 FPS, 0.026 s/image).")
+    else:
+        st.sidebar.caption("Fast instance segmentation model.")
 
 if model_type == "yolo":
-    conf_thresh = st.sidebar.slider("Instance Confidence Threshold (V1 only)", 0.05, 0.80, 0.20, 0.05)
-    default_imgsz = 1024 if "yolo26n_sem_v2" in model_path else 512
+    conf_thresh = st.sidebar.slider("Confidence Threshold", 0.05, 0.80, 0.20, 0.05)
+    default_imgsz = 1024 if "yolo26n_sem" in model_path else 512
     img_size = st.sidebar.select_slider("Image Resolution (px)", options=[384, 512, 640, 768, 1024], value=default_imgsz)
 else:
     conf_thresh = 0.20
@@ -103,9 +86,7 @@ st.sidebar.markdown(r"""
 
 
 @st.cache_resource(max_entries=1)
-def load_pipeline(ckpt_path: str, cond_path: str, conf: float, imgsz: int, selected_type: str):
-    # Keep only the selected model resident; SegFormer-B5 uses most of the
-    # memory available on a 4 GB GPU.
+def load_pipeline(ckpt_path: str, conf: float, imgsz: int, selected_type: str):
     gc.collect()
     try:
         import torch
@@ -115,9 +96,6 @@ def load_pipeline(ckpt_path: str, cond_path: str, conf: float, imgsz: int, selec
         pass
     return CoralPipeline(
         model_path=ckpt_path,
-        # Pass an explicit nonexistent path when the UI selection is Disabled;
-        # None would let the pipeline auto-load its legacy default classifier.
-        condition_model_path=cond_path if cond_path and Path(cond_path).exists() else "__disabled_from_ui__",
         imgsz=imgsz,
         conf=conf,
         model_type=selected_type,
@@ -138,7 +116,7 @@ if mode == "Single Image":
                     overlay_path = Path(tmp) / "overlay.jpg"
                     image_path.write_bytes(uploaded.getbuffer())
 
-                    pipeline = load_pipeline(model_path, condition_model_path, conf_thresh, img_size, model_type)
+                    pipeline = load_pipeline(model_path, conf_thresh, img_size, model_type)
                     report = pipeline.infer(image_path, overlay_path)
 
                     # 1. Trust & Reliability Banner
@@ -186,7 +164,7 @@ if mode == "Single Image":
                         st.image(str(overlay_path), width="stretch")
 
                     # 4. Details & Composition Table
-                    tab1, tab2, tab3 = st.tabs(["📊 Benthic Composition", "🔬 Crop Condition Analysis", "🛡️ Quality & Trust Signals"])
+                    tab1, tab2 = st.tabs(["📊 Benthic Composition", "🛡️ Quality & Trust Signals"])
 
                     with tab1:
                         st.markdown("#### Benthic Area Breakdown")
@@ -198,25 +176,6 @@ if mode == "Single Image":
                         st.dataframe(comp_df, width="stretch")
 
                     with tab2:
-                        if report["condition_classifier_evaluated"]:
-                            st.markdown("#### Crop-Level Coral Condition Verification")
-                            crops = report["crop_evaluations"]
-                            st.info(f"Evaluated {len(crops)} coral crops using secondary condition classifier.")
-                            crop_df = pd.DataFrame([
-                                {
-                                    "Detection ID": c["detection_id"],
-                                    "Predicted Condition": c["predicted_condition"],
-                                    "Alive Probability": round(c["probabilities"].get("coral_alive", 0), 3),
-                                    "Bleached Probability": round(c["probabilities"].get("coral_bleached", 0), 3),
-                                    "Dead Probability": round(c["probabilities"].get("coral_dead", 0), 3),
-                                }
-                                for c in crops
-                            ])
-                            st.dataframe(crop_df, width="stretch")
-                        else:
-                            st.caption("Coral condition was estimated directly from the selected semantic segmentation model.")
-
-                    with tab3:
                         st.markdown("#### Image Quality & Uncertainty Signals")
                         qcol1, qcol2 = st.columns(2)
                         with qcol1:
@@ -265,7 +224,7 @@ else:
                 video_path.write_bytes(uploaded_video.getbuffer())
                 out_dir = Path(tmp) / "video_out"
 
-                pipeline = load_pipeline(model_path, condition_model_path, conf_thresh, img_size, model_type)
+                pipeline = load_pipeline(model_path, conf_thresh, img_size, model_type)
 
                 def _progress_cb(current: int, total: int):
                     frac = min(1.0, current / max(1, total))

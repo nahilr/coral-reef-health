@@ -5,12 +5,24 @@ import cv2
 import numpy as np
 
 
-def assess_image(image_or_path, min_blur: float = 12.0) -> dict:
+def assess_image(image_or_path, min_blur: float = 12.0, is_bgr: bool = True) -> dict:
+    """Assess visual quality of an underwater image (blur, exposure, contrast, color cast).
+
+    Parameters
+    ----------
+    image_or_path : str, Path, or np.ndarray
+        File path or numpy image array (H, W, 3).
+    min_blur : float
+        Laplacian variance threshold for blur detection (default: 12.0).
+    is_bgr : bool
+        True if array input is already in BGR format (default for OpenCV cv2.imread / VideoCapture).
+        Set to False if input array is RGB (e.g. from PIL Image).
+    """
     if isinstance(image_or_path, (str, Path)):
         image = cv2.imread(str(image_or_path), cv2.IMREAD_COLOR)
     else:
         image = np.asarray(image_or_path)
-        if image.ndim == 3 and image.shape[2] == 3:
+        if not is_bgr and image.ndim == 3 and image.shape[2] == 3:
             image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
     if image is None or image.size == 0:
         return {"quality_score": 0.0, "status": "needs_review", "flags": ["unreadable"]}

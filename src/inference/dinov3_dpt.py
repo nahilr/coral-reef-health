@@ -1,4 +1,4 @@
-"""Inference for the released DINOv3 + DPT CoralscapesV2 checkpoints.
+"""Inference for the released DINOv3 + DPT Coralscapes checkpoints.
 
 The EPFL-ECEO ``coralscapesv2-dinov3-*-lora-dpt*`` repos are not ``transformers``
 AutoModels. Each ships ``coralscapes_hub_model.py`` describing a frozen DINOv3
@@ -14,7 +14,7 @@ hyperparameters are recoverable from the checkpoint's own tensor shapes, so the
 architecture is rebuilt with ``AutoModel.from_config`` and no gated artefact is
 contacted.
 
-Model output ID 0 is void; IDs 1..95 are the native CoralscapesV2 classes, which
+Model output ID 0 is void; IDs 1..95 are the native Coralscapes classes, which
 are folded into the project taxonomy by name, exactly like the SegFormer-95
 checkpoint.
 """
@@ -27,12 +27,12 @@ from types import ModuleType
 
 import numpy as np
 
-from src.data.v2_label_map import V2_CLASSES, V2_TO_ID, v2_name_to_class
+from src.data.label_map import CLASSES, CLASS_TO_ID, raw_name_to_class
 
 MODEL_TYPE = "dinov3_dpt_segmenter"
 DEFAULT_REPO = "EPFL-ECEO/coralscapesv2-dinov3-vitl-lora-dpt-95_class"
 # Sink for the model's void label and for fine labels with no project destination.
-PROJECT_SINK = len(V2_CLASSES)
+PROJECT_SINK = len(CLASSES)
 VOID = 255
 
 
@@ -195,8 +195,8 @@ def dinov3_project_ids(labels_by_id: dict[int, str], num_model_classes: int) -> 
         if index == 0 or not name or name.lower() in {"void", "unlabeled"}:
             ids.append(PROJECT_SINK)
             continue
-        project_class = v2_name_to_class(name)
-        ids.append(V2_TO_ID[project_class] if project_class else PROJECT_SINK)
+        project_class = raw_name_to_class(name)
+        ids.append(CLASS_TO_ID[project_class] if project_class else PROJECT_SINK)
     return ids
 
 
@@ -222,7 +222,7 @@ def predict_project_map(
         image = image.resize((width, height), PILImage.Resampling.BILINEAR)
     pixel_values = processor(images=image, return_tensors="pt", do_resize=False)["pixel_values"]
     pixel_values = pixel_values.to(device)
-    num_project = len(V2_CLASSES)
+    num_project = len(CLASSES)
     with torch.inference_mode():
         logits = model(pixel_values).float()
         if logits.shape[1] != len(project_ids):
