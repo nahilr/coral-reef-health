@@ -83,7 +83,7 @@ def train_condition(crop_root: Path, output: Path, epochs: int = 1, batch: int =
 
 
 def main():
-    p = argparse.ArgumentParser(); p.add_argument("--manifest", default="data/processed/coralscapes_yolo/manifest.csv"); p.add_argument("--raw-classes", default="data/processed/coralscapes_yolo/classes.json"); p.add_argument("--crops", default="data/processed/condition_crops"); p.add_argument("--checkpoint", default="models/checkpoints/condition_resnet18.pt"); p.add_argument("--per-class", type=int, default=250); p.add_argument("--epochs", type=int, default=1); p.add_argument("--batch", type=int, default=32)
+    p = argparse.ArgumentParser(); p.add_argument("--manifest", default="data/processed/v1_yolo/manifest.csv"); p.add_argument("--raw-classes", default="data/processed/v1_yolo/classes.json"); p.add_argument("--crops", default="data/processed/v1_condition_crops"); p.add_argument("--checkpoint", default="models/checkpoints/condition_resnet18.pt"); p.add_argument("--per-class", type=int, default=250); p.add_argument("--epochs", type=int, default=1); p.add_argument("--batch", type=int, default=32)
     a = p.parse_args(); counts = make_crops(Path(a.manifest), Path(a.raw_classes), Path(a.crops), a.per_class); metrics = train_condition(Path(a.crops), Path(a.checkpoint), a.epochs, a.batch); print(json.dumps({"crop_counts": counts, "metrics": metrics, "checkpoint": a.checkpoint}, indent=2))
 
 

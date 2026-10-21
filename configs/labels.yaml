@@ -1,11 +1,28 @@
+dataset: josauder/coralscapesV2
+taxonomy: coralscapes-v2-project-7
+# Compressed 7-class taxonomy of the 95 CoralscapesV2 classes.
+# The explicit 95 -> project mapping lives in configs/label_map.json.
 classes:
   - coral_alive
   - coral_bleached
-  - coral_dead
+  - dead_coral
   - algae
-  - rubble
-  - sand_rock
-  - other
-ignored_raw_classes:
-  - background
-  - dark
+  - hard_substrate
+  - sand
+  - non_reef
+roles:
+  # Classes used to compute reef health ratios (the health denominator).
+  reef:
+    - coral_alive
+    - coral_bleached
+    - dead_coral
+    - algae
+    - hard_substrate
+    - sand
+  # Predicted, but removed from the reef denominator.
+  excluded_from_health:
+    - non_reef
+  # Classes that only exist so non-reef pixels have somewhere to go.
+  discard_sink:
+    - non_reef
+mapping_file: configs/label_map.json

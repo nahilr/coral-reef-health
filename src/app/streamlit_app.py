@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import gc
 import tempfile
 import sys
 from pathlib import Path
@@ -12,7 +13,9 @@ if str(REPO_ROOT) not in sys.path:
 
 import streamlit as st
 import pandas as pd
+import cv2
 from src.inference.pipeline import CoralPipeline
+from src.inference.dinov3_dpt import is_dinov3_dpt
 
 st.set_page_config(
     page_title="AI Coral Reef Health Assessment",
@@ -25,10 +28,69 @@ st.caption("Automated benthic segmentation, quantitative reef health indicators,
 
 # Sidebar Configuration
 st.sidebar.header("Configuration")
-model_path = st.sidebar.text_input("Segmentation Model Checkpoint", "models/checkpoints/yolo26n_seg/weights/best.pt")
-condition_model_path = st.sidebar.text_input("Condition Classifier Checkpoint", "models/checkpoints/condition_resnet18.pt")
-conf_thresh = st.sidebar.slider("Detection Confidence Threshold", 0.05, 0.80, 0.20, 0.05)
-img_size = st.sidebar.select_slider("Image Resolution (px)", options=[384, 512, 640], value=512)
+model_choices: dict[str, str] = {}
+for checkpoint in sorted((REPO_ROOT / "models/checkpoints").glob("**/best.pt")):
+    rel_path = checkpoint.relative_to(REPO_ROOT).as_posix()
+    model_choices[rel_path] = str(checkpoint)
+
+# Hugging Face Transformers checkpoints are directories containing config and
+# weights, so expose the model directory as one selectable artifact.
+for config_path in sorted((REPO_ROOT / "models/pretrained").glob("*/config.json")):
+    model_dir = config_path.parent
+    if any(model_dir.glob("*.safetensors")) or any(model_dir.glob("pytorch_model*.bin")):
+        rel_path = model_dir.relative_to(REPO_ROOT).as_posix()
+        model_choices[rel_path] = str(model_dir)
+
+if not model_choices:
+    st.sidebar.error("No model checkpoints found under models/checkpoints or models/pretrained.")
+    st.stop()
+
+preferred_model = "models/checkpoints/yolo26n_sem_v2/weights/best.pt"
+default_model = preferred_model if preferred_model in model_choices else next(iter(model_choices))
+selected_model_file = st.sidebar.selectbox(
+    "Model file",
+    options=list(model_choices),
+    index=list(model_choices).index(default_model),
+    help="Choose a trained checkpoint. SegFormer is listed by its model folder because it uses multiple files.",
+)
+model_path = model_choices[selected_model_file]
+if Path(model_path).is_dir():
+    model_type = "dinov3" if is_dinov3_dpt(model_path) else "segformer"
+else:
+    model_type = "yolo"
+
+if model_type == "dinov3":
+    st.sidebar.caption("Strongest published CoralscapesV2 model (DINOv3 ViT-L + DPT); uses more memory and runs slower.")
+elif model_type == "segformer":
+    st.sidebar.caption("Published CoralscapesV2 SegFormer-B5; uses more memory and runs slower.")
+else:
+    if "yolo26n_sem_v2" in model_path:
+        st.sidebar.caption("Fastest in our comparison (0.10 s/image); dense semantic masks on the project taxonomy (no per-colony boxes).")
+
+condition_choices: dict[str, str | None] = {"Disabled": None}
+for checkpoint in sorted((REPO_ROOT / "models/checkpoints").glob("**/condition*.pt")):
+    rel_path = checkpoint.relative_to(REPO_ROOT).as_posix()
+    condition_choices[rel_path] = str(checkpoint)
+default_condition = "models/checkpoints/condition_resnet18.pt"
+if default_condition not in condition_choices:
+    default_condition = "Disabled"
+selected_condition = st.sidebar.selectbox(
+    "Condition classifier file",
+    options=list(condition_choices),
+    index=list(condition_choices).index(default_condition),
+    help="Optional crop classifier for live, bleached, and dead coral. It needs coral detections from an instance segmentation model.",
+)
+condition_model_path = condition_choices[selected_condition] or ""
+if condition_model_path and (model_type in {"segformer", "dinov3"} or "yolo26n_sem_v2" in model_path):
+    st.sidebar.caption("This model produces semantic masks without coral bounding boxes, so the crop classifier will not run for this selection.")
+
+if model_type == "yolo":
+    conf_thresh = st.sidebar.slider("Instance Confidence Threshold (V1 only)", 0.05, 0.80, 0.20, 0.05)
+    default_imgsz = 1024 if "yolo26n_sem_v2" in model_path else 512
+    img_size = st.sidebar.select_slider("Image Resolution (px)", options=[384, 512, 640, 768, 1024], value=default_imgsz)
+else:
+    conf_thresh = 0.20
+    img_size = 1024
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("### Ecological Benchmarks (Reef Check)")
@@ -40,13 +102,25 @@ st.sidebar.markdown(r"""
 """)
 
 
-@st.cache_resource
-def load_pipeline(ckpt_path: str, cond_path: str, conf: float, imgsz: int):
+@st.cache_resource(max_entries=1)
+def load_pipeline(ckpt_path: str, cond_path: str, conf: float, imgsz: int, selected_type: str):
+    # Keep only the selected model resident; SegFormer-B5 uses most of the
+    # memory available on a 4 GB GPU.
+    gc.collect()
+    try:
+        import torch
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except Exception:
+        pass
     return CoralPipeline(
         model_path=ckpt_path,
-        condition_model_path=cond_path if Path(cond_path).exists() else None,
+        # Pass an explicit nonexistent path when the UI selection is Disabled;
+        # None would let the pipeline auto-load its legacy default classifier.
+        condition_model_path=cond_path if cond_path and Path(cond_path).exists() else "__disabled_from_ui__",
         imgsz=imgsz,
         conf=conf,
+        model_type=selected_type,
     )
 
 
@@ -64,7 +138,7 @@ if mode == "Single Image":
                     overlay_path = Path(tmp) / "overlay.jpg"
                     image_path.write_bytes(uploaded.getbuffer())
 
-                    pipeline = load_pipeline(model_path, condition_model_path, conf_thresh, img_size)
+                    pipeline = load_pipeline(model_path, condition_model_path, conf_thresh, img_size, model_type)
                     report = pipeline.infer(image_path, overlay_path)
 
                     # 1. Trust & Reliability Banner
@@ -88,12 +162,17 @@ if mode == "Single Image":
                                   delta_color="inverse",
                                   help="Ratio of bleached coral to total coral colony area.")
                     with col3:
-                        st.metric("Macroalgae Cover", f"{health['macroalgae_cover_pct']}%",
-                                  delta=f"Coral/Algae: {health['coral_to_algae_ratio']}",
+                        st.metric("Algae-Covered Area", f"{health.get('algae_covered_cover_pct', health['macroalgae_cover_pct'])}%",
+                                  delta=f"Coral/Algae-Covered: {health['coral_to_algae_ratio']}",
                                   delta_color="normal",
-                                  help="Algal cover indicates potential macroalgal competition.")
+                                  help="Area annotated as algae-covered in the segmentation labels.")
                     with col4:
-                        st.metric("Reef Health Status", health["reef_health_category"])
+                        st.metric("Reef Health Status", health["reef_health_category"].split(" [")[0],
+                                  help=health["reef_health_category"])
+                        st.caption(
+                            f"{health.get('coral_condition', 'Stable')} · "
+                            f"cover tier {health.get('live_cover_tier', 'n/a')}"
+                        )
 
                     st.markdown("---")
 
@@ -101,10 +180,10 @@ if mode == "Single Image":
                     img_col1, img_col2 = st.columns(2)
                     with img_col1:
                         st.subheader("Input Imagery")
-                        st.image(str(image_path), use_container_width=True)
+                        st.image(str(image_path), width="stretch")
                     with img_col2:
                         st.subheader("Benthic Segmentation Overlay")
-                        st.image(str(overlay_path), use_container_width=True)
+                        st.image(str(overlay_path), width="stretch")
 
                     # 4. Details & Composition Table
                     tab1, tab2, tab3 = st.tabs(["📊 Benthic Composition", "🔬 Crop Condition Analysis", "🛡️ Quality & Trust Signals"])
@@ -116,7 +195,7 @@ if mode == "Single Image":
                             {"Class": k.replace("_", " ").title(), "Area Fraction (%)": round(v * 100, 2)}
                             for k, v in comp.items()
                         ])
-                        st.dataframe(comp_df, use_container_width=True)
+                        st.dataframe(comp_df, width="stretch")
 
                     with tab2:
                         if report["condition_classifier_evaluated"]:
@@ -133,9 +212,9 @@ if mode == "Single Image":
                                 }
                                 for c in crops
                             ])
-                            st.dataframe(crop_df, use_container_width=True)
+                            st.dataframe(crop_df, width="stretch")
                         else:
-                            st.caption("Condition was directly estimated from YOLO multi-class segmentation masks.")
+                            st.caption("Coral condition was estimated directly from the selected semantic segmentation model.")
 
                     with tab3:
                         st.markdown("#### Image Quality & Uncertainty Signals")
@@ -148,8 +227,10 @@ if mode == "Single Image":
                             st.write(f"- **Overall Quality Score**: {qual.get('quality_score', 0):.2f}")
                         with qcol2:
                             st.write(f"- **Segmented Benthic Coverage**: {report['coverage']*100:.1f}%")
-                            st.write(f"- **Mean Detection Confidence**: {report['mean_confidence']:.3f}")
-                            st.write(f"- **Prediction Uncertainty Score**: {report['prediction_uncertainty']:.3f}")
+                            conf = report.get("mean_confidence")
+                            unc = report.get("prediction_uncertainty")
+                            st.write(f"- **Mean Prediction Confidence**: {f'{conf:.3f}' if conf is not None else 'n/a (backend returns class IDs only)'}")
+                            st.write(f"- **Prediction Uncertainty Score**: {f'{unc:.3f}' if unc is not None else 'n/a'}")
                             st.write(f"- **Review Triggers**: {rel['reasons'] if rel['reasons'] else 'None'}")
 
                     st.download_button(
@@ -161,40 +242,76 @@ if mode == "Single Image":
 
 else:
     uploaded_video = st.file_uploader("Upload an underwater survey video", type=["mp4", "avi", "mov", "mkv"])
-    every_n = st.slider("Sample Every N Frames", 5, 60, 15)
-    max_frames = st.slider("Maximum Sampled Frames", 4, 60, 12)
+    vcol_a, vcol_b = st.columns(2)
+    with vcol_a:
+        every_n = st.slider("Process Every N Frames (1 = full video)", 1, 60, 2,
+                            help="1 processes every frame. 2 or 5 processes every 2nd/5th frame for higher throughput.")
+    with vcol_b:
+        process_entire = st.checkbox("Process Entire Video (All Frames)", value=True,
+                                     help="When checked, processes the complete video from start to finish without truncation.")
+        if not process_entire:
+            max_frames = st.number_input("Max frames to process", min_value=10, max_value=200000, value=300, step=50,
+                                         help="Caps total frames processed for quick previews.")
+        else:
+            max_frames = None
 
     if uploaded_video:
         if not Path(model_path).exists():
             st.error(f"Checkpoint not found: {model_path}.")
         else:
-            with st.spinner("Extracting survey frames and assessing reef health across video..."):
-                with tempfile.TemporaryDirectory() as tmp:
-                    video_path = Path(tmp) / uploaded_video.name
-                    video_path.write_bytes(uploaded_video.getbuffer())
-                    out_dir = Path(tmp) / "video_out"
+            progress_bar = st.progress(0, text="Initializing video inference...")
+            with tempfile.TemporaryDirectory() as tmp:
+                video_path = Path(tmp) / uploaded_video.name
+                video_path.write_bytes(uploaded_video.getbuffer())
+                out_dir = Path(tmp) / "video_out"
 
-                    pipeline = load_pipeline(model_path, condition_model_path, conf_thresh, img_size)
-                    result = pipeline.infer_video(video_path, out_dir, every_n=every_n, max_frames=max_frames)
-                    summary = result["summary"]
+                pipeline = load_pipeline(model_path, condition_model_path, conf_thresh, img_size, model_type)
 
-                    st.subheader(f"Survey Assessment: {summary.get('overall_health_category', 'Assessed')}")
-                    vcol1, vcol2, vcol3 = st.columns(3)
-                    with vcol1:
-                        st.metric("Accepted Frames", f"{summary['accepted_frames']} / {summary['total_frames']}")
-                    with vcol2:
-                        st.metric("Survey Mean Live Coral Cover", f"{summary['aggregated_health_metrics']['mean_live_coral_cover_pct']}%")
-                    with vcol3:
-                        st.metric("Survey Mean Bleaching Ratio", f"{summary['aggregated_health_metrics']['mean_bleaching_ratio_pct']}%")
+                def _progress_cb(current: int, total: int):
+                    frac = min(1.0, current / max(1, total))
+                    progress_bar.progress(frac, text=f"Processing frame {current} of ~{total} ({int(frac * 100)}%)...")
 
-                    overlays = sorted(out_dir.glob("*_overlay.jpg"))[:6]
-                    if overlays:
-                        st.subheader("Sampled Video Overlays")
-                        st.image([str(p) for p in overlays], caption=[p.name for p in overlays], width=350)
+                result = pipeline.infer_video(
+                    video_path, out_dir, every_n=every_n, max_frames=max_frames,
+                    save_frames=True, progress_callback=_progress_cb
+                )
+                progress_bar.progress(1.0, text="Finalizing video encoding...")
+                summary = result["summary"]
 
-                    st.download_button(
-                        "📥 Download Video Survey Report (JSON)",
-                        json.dumps(result, indent=2),
-                        file_name="video_survey_report.json",
-                        mime="application/json",
-                    )
+                video_output_bytes = None
+                if result.get("annotated_video") and Path(result["annotated_video"]).exists():
+                    video_output_bytes = Path(result["annotated_video"]).read_bytes()
+
+                overlays = sorted(out_dir.glob("*_overlay.jpg"))[:6]
+                overlay_images = [cv2.cvtColor(cv2.imread(str(p)), cv2.COLOR_BGR2RGB) for p in overlays if p.exists()]
+            progress_bar.empty()
+
+            st.subheader(f"Survey Assessment: {summary.get('overall_health_category', 'Assessed')}")
+            vcol1, vcol2, vcol3 = st.columns(3)
+            with vcol1:
+                st.metric("Accepted Frames", f"{summary['accepted_frames']} / {summary['total_frames']}")
+            with vcol2:
+                st.metric("Survey Mean Live Coral Cover", f"{summary['aggregated_health_metrics']['mean_live_coral_cover_pct']}%")
+            with vcol3:
+                st.metric("Survey Mean Bleaching Ratio", f"{summary['aggregated_health_metrics']['mean_bleaching_ratio_pct']}%")
+
+            if video_output_bytes:
+                st.subheader("Annotated Video Stream")
+                st.video(video_output_bytes)
+                st.download_button(
+                    "📥 Download Annotated Video (.mp4)",
+                    data=video_output_bytes,
+                    file_name=f"annotated_{Path(uploaded_video.name).stem}.mp4",
+                    mime="video/mp4",
+                )
+
+            if overlay_images:
+                st.subheader("Sampled Keyframe Overlays")
+                st.image(overlay_images, caption=[p.name for p in overlays], width=350)
+
+            st.download_button(
+                "📥 Download Video Survey Report (JSON)",
+                json.dumps(result, indent=2),
+                file_name="video_survey_report.json",
+                mime="application/json",
+            )

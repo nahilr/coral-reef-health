@@ -12,6 +12,7 @@ import numpy as np
 from PIL import Image
 
 from .label_map import BROAD_CLASSES, load_coralscapes_classes, make_raw_to_broad
+from .v2_label_map import V2_CLASSES, load_v2_labels, make_v2_to_project, project_v2_mask
 
 
 def contours_to_yolo(mask: np.ndarray, broad_id: int, output_size=None, min_area=20):
@@ -155,10 +156,86 @@ def prepare_from_hf_snapshot(root: Path, out: Path, max_images_per_split: int | 
     return {"images": len(rows), "by_split": {s: sum(r["split"] == s for r in rows) for s in ("train", "val", "test")}, "out": str(out)}
 
 
+def prepare_v2(root: Path, out: Path, max_images_per_split: int | None = None) -> dict:
+    """Prepare the semantic CoralscapesV2 snapshot as project-taxonomy YOLO data."""
+    import io
+    import pyarrow.parquet as pq
+
+    root, out = root.resolve(), out.resolve()
+    raw_labels = load_v2_labels(root / "id2label.json")
+    raw_to_project = make_v2_to_project(raw_labels)
+    rows = []
+    split_names = {"train": "train", "validation": "val", "test": "test"}
+
+    for split, out_split in split_names.items():
+        parquet_files = sorted((root / "data").glob(f"{split}-*.parquet"))
+        if not parquet_files:
+            raise FileNotFoundError(f"No CoralscapesV2 {split} Parquet files under {root / 'data'}")
+        for subdir in ("images", "masks", "labels"):
+            (out / subdir / out_split).mkdir(parents=True, exist_ok=True)
+
+        index = 0
+        for parquet_path in parquet_files:
+            parquet = pq.ParquetFile(parquet_path)
+            for batch in parquet.iter_batches(batch_size=8):
+                for row in batch.to_pylist():
+                    if max_images_per_split is not None and index >= max_images_per_split:
+                        break
+                    image = Image.open(io.BytesIO(row["image"]["bytes"])).convert("RGB")
+                    raw_mask = np.asarray(Image.open(io.BytesIO(row["label"]["bytes"])))
+                    mapped = project_v2_mask(raw_mask, raw_to_project)
+                    stem = f"{out_split}_{index:06d}"
+                    image_path = out / "images" / out_split / f"{stem}.png"
+                    mask_path = out / "masks" / out_split / f"{stem}.png"
+                    label_path = out / "labels" / out_split / f"{stem}.txt"
+                    image.save(image_path, compress_level=1)
+                    Image.fromarray(raw_mask.astype(np.uint8)).save(mask_path)
+                    yolo_lines = []
+                    for class_id in range(len(V2_CLASSES)):
+                        yolo_lines.extend(contours_to_yolo(mapped, class_id))
+                    label_path.write_text("\n".join(yolo_lines) + ("\n" if yolo_lines else ""))
+                    rows.append({
+                        "image": str(image_path), "mask": str(mask_path), "split": out_split,
+                        "site": str(row.get("site", "")), "group": str(row.get("stem", stem)),
+                        "label_count": len(yolo_lines),
+                    })
+                    index += 1
+                if max_images_per_split is not None and index >= max_images_per_split:
+                    break
+        print(f"Prepared CoralscapesV2 {split}: {index} images", flush=True)
+
+    if not rows:
+        raise RuntimeError(f"No images were prepared from {root}")
+    with (out / "manifest.csv").open("w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=list(rows[0]))
+        writer.writeheader()
+        writer.writerows(rows)
+
+    config = {
+        "path": str(out), "train": "images/train", "val": "images/val", "test": "images/test",
+        "masks_dir": "masks",
+        "names": V2_CLASSES,
+    }
+    (out / "data.yaml").write_text(json.dumps(config, indent=2))
+    (out / "classes.json").write_text(json.dumps({i: name for i, name in raw_labels.items()}, indent=2))
+    (out / "label_map.json").write_text(json.dumps({
+        "dataset": "josauder/coralscapesV2",
+        "raw_classes": raw_labels,
+        "raw_to_project": raw_to_project,
+        "project_classes": V2_CLASSES,
+        "ignored_raw_classes": [name for raw_id, name in raw_labels.items() if raw_to_project[raw_id] is None],
+    }, indent=2))
+    return {
+        "dataset": "josauder/coralscapesV2", "images": len(rows),
+        "by_split": {split: sum(row["split"] == split for row in rows) for split in ("train", "val", "test")},
+        "classes": V2_CLASSES, "out": str(out),
+    }
+
+
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("--root", type=Path, default=Path("datasets/coralscapes_hf"))
-    p.add_argument("--out", type=Path, default=Path("data/processed/coralscapes_yolo"))
+    p.add_argument("--root", type=Path, default=Path("data/raw/coralscapes_hf"))
+    p.add_argument("--out", type=Path, default=Path("data/processed/v1_yolo"))
     p.add_argument("--max-images-per-split", type=int, default=None)
     p.add_argument("--copy-images", action="store_true",
                    help="Copy image files instead of creating local symlinks (portable for Colab/Drive).")

@@ -14,6 +14,15 @@ venv/
 runs/
 *.log
 
+# Public pretrained backbones: ~1.6 GB, fetched with scripts/fetch_pretrained.py
+models/pretrained/
+
+# Training-resume artefacts: best.pt is the deliverable
+models/checkpoints/*/weights/last.pt
+
+# Loose base weights dropped in the repo root
+/yolo*.pt
+
 # Data (too large for git; see data/README.md)
 /data/*
 !/data/README.md
@@ -38,4 +47,3 @@ problem.md
 
 # Phase I presentation/report artifacts (kept locally, not in git)
 /BTP artifacts/
-/BTP_Phase I_Review I_Presentation _Group_9.pptx.pdf

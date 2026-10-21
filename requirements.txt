@@ -1,6 +1,7 @@
 torch>=2.1
 torchvision>=0.16
 ultralytics>=8.4
+transformers>=4.40,<6
 opencv-python-headless>=4.8
 numpy>=1.26
 pandas>=2.0

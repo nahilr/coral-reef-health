@@ -81,9 +81,15 @@ def prediction_uncertainty(scores) -> float:
     return float(np.clip(np.mean(h), 0.0, 1.0))
 
 
-def review_decision(quality: dict, confidence: float, coverage: float, uncertainty: float,
-                    thresholds: dict | None = None) -> dict:
-    """Evaluate whether an analysis result meets trustworthiness criteria or requires review."""
+def review_decision(quality: dict, confidence: float | None, coverage: float,
+                    uncertainty: float | None, thresholds: dict | None = None) -> dict:
+    """Evaluate whether an analysis result meets trustworthiness criteria or requires review.
+
+    ``confidence`` and ``uncertainty`` may be ``None`` when the backend cannot
+    produce them (e.g. a semantic model that only returns class IDs). Those
+    checks are then skipped instead of failing on a fabricated zero, which used
+    to force every such result into ``needs_review`` regardless of its content.
+    """
     default_thresholds = {
         "confidence": 0.22,      # Minimum mean confidence across detections
         "coverage": 0.05,        # Minimum benthic coverage required
@@ -94,11 +100,11 @@ def review_decision(quality: dict, confidence: float, coverage: float, uncertain
     quality_flags = list(quality.get("flags", []))
     reliability_flags = []
 
-    if confidence < thresholds["confidence"]:
+    if confidence is not None and confidence < thresholds["confidence"]:
         reliability_flags.append("low_confidence")
     if coverage < thresholds["coverage"]:
         reliability_flags.append("low_predicted_coverage")
-    if uncertainty > thresholds["uncertainty"]:
+    if uncertainty is not None and uncertainty > thresholds["uncertainty"]:
         reliability_flags.append("high_uncertainty")
 
     all_reasons = sorted(set(quality_flags + reliability_flags))
@@ -109,5 +115,7 @@ def review_decision(quality: dict, confidence: float, coverage: float, uncertain
         "reasons": all_reasons,
         "quality_flags": quality_flags,
         "reliability_flags": reliability_flags,
+        "confidence_available": confidence is not None,
+        "uncertainty_available": uncertainty is not None,
         "thresholds": thresholds,
     }

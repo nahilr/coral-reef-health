@@ -13,14 +13,22 @@ if str(REPO_ROOT) not in sys.path:
 
 from ultralytics import YOLO
 from src.data.label_map import BROAD_CLASSES, broad_mask, load_coralscapes_classes, make_raw_to_broad
+from src.data.v2_label_map import V2_CLASSES, load_v2_labels, make_v2_to_project, project_v2_mask
 from src.trust.reliability import expected_calibration_error
 
 
 def predicted_map(result, shape):
-    """Render dense class map and confidence map from YOLO instance segmentation output."""
+    """Render dense maps from YOLO semantic or instance segmentation output."""
     h, w = shape
     out = np.full((h, w), 255, dtype=np.uint8)
     conf = np.full((h, w), -1.0, dtype=np.float32)
+    semantic = getattr(result, "semantic_mask", None)
+    if semantic is not None:
+        class_map = semantic.data.detach().cpu().numpy().astype(np.uint8)
+        if class_map.shape != (h, w):
+            class_map = cv2.resize(class_map, (w, h), interpolation=cv2.INTER_NEAREST)
+        out[:] = class_map
+        return out, conf
     if result.masks is None or result.boxes is None:
         return out, conf
     masks = result.masks.data.detach().cpu().numpy()
@@ -53,7 +61,10 @@ def evaluate(model_path: str | Path, manifest: str | Path, raw_classes_path: str
         raw = cv2.imread(row.mask, cv2.IMREAD_UNCHANGED)
         truth = broad_mask(raw, raw_to_broad)
 
-        result = model.predict(source=image, imgsz=imgsz, conf=conf, verbose=False)[0]
+        predict_args = {"source": image, "imgsz": imgsz, "verbose": False}
+        if getattr(model, "task", None) != "semantic":
+            predict_args["conf"] = conf
+        result = model.predict(**predict_args)[0]
         pred, conf_map = predicted_map(result, truth.shape)
 
         # Unsegmented regions count as "other" background class for recall evaluation
@@ -105,11 +116,61 @@ def evaluate(model_path: str | Path, manifest: str | Path, raw_classes_path: str
     return metrics
 
 
+def evaluate_v2(model_path: str | Path, manifest: str | Path, raw_classes_path: str | Path,
+                max_images: int | None = None, conf: float = 0.20, imgsz: int = 512,
+                out: str | Path | None = None) -> dict:
+    """Evaluate the V2 checkpoint against the project taxonomy V2 mapping."""
+    df = pd.read_csv(manifest)
+    df = df[df.split == "test"]
+    if max_images:
+        df = df.head(max_images)
+
+    model = YOLO(str(model_path))
+    raw_to_project = make_v2_to_project(load_v2_labels(raw_classes_path))
+    # An extra column records foreground pixels missed by the detector.
+    cm = np.zeros((len(V2_CLASSES), len(V2_CLASSES) + 1), dtype=np.int64)
+
+    for row in df.itertuples():
+        image = cv2.imread(row.image)
+        raw = cv2.imread(row.mask, cv2.IMREAD_UNCHANGED)
+        truth = project_v2_mask(raw, raw_to_project)
+        predict_args = {"source": image, "imgsz": imgsz, "verbose": False}
+        if getattr(model, "task", None) != "semantic":
+            predict_args["conf"] = conf
+        result = model.predict(**predict_args)[0]
+        pred, _ = predicted_map(result, truth.shape)
+        pred[pred == 255] = len(V2_CLASSES)
+        valid = truth != 255
+        t, p = truth[valid].ravel(), pred[valid].ravel()
+        np.add.at(cm, (t, p), 1)
+
+    per_class_iou = {}
+    for i, name in enumerate(V2_CLASSES):
+        tp = cm[i, i]
+        denom = cm[i].sum() + cm[:, i].sum() - tp
+        per_class_iou[name] = round(float(tp / denom), 4) if denom else 0.0
+    metrics = {
+        "dataset": "josauder/coralscapesV2",
+        "images": int(len(df)),
+        "classes": V2_CLASSES,
+        "confidence_threshold": conf,
+        "mIoU": round(float(np.mean(list(per_class_iou.values()))), 4),
+        "per_class_iou": per_class_iou,
+        "confusion_matrix": cm.tolist(),
+        "missed_prediction_column": len(V2_CLASSES),
+    }
+    if out:
+        out_path = Path(out)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(json.dumps(metrics, indent=2))
+    return metrics
+
+
 def main():
     p = argparse.ArgumentParser(description="Evaluate YOLO segmentation model on test set")
     p.add_argument("--model", required=True)
-    p.add_argument("--manifest", default="data/processed/coralscapes_yolo/manifest.csv")
-    p.add_argument("--raw-classes", default="data/processed/coralscapes_yolo/classes.json")
+    p.add_argument("--manifest", default="data/processed/v1_yolo/manifest.csv")
+    p.add_argument("--raw-classes", default="data/processed/v1_yolo/classes.json")
     p.add_argument("--max-images", type=int, default=None)
     p.add_argument("--conf", type=float, default=0.20,
                    help="Prediction confidence threshold.")
