@@ -33,13 +33,13 @@ Image / video upload
 |---|---|---|
 | Quality gate | Laplacian blur score, exposure/contrast checks, color-cast flag | Cheap, explainable and protects the model from unusable frames. |
 | Segmentation benchmark | Released CoralscapesV2 SegFormer-B5 model with predictions mapped to project classes | Provides a reef-trained reference point using the dataset authors’ evaluation protocol. |
-| Segmentation project model | YOLO26n-sem trained on dense 20-class PNG masks | Produces a full-scene class map suited to cover estimates; compare its held-out results with the released SegFormer benchmark. |
+| Segmentation project model | YOLO26n-sem trained on dense project-taxonomy (7-class) PNG masks | Produces a full-scene class map suited to cover estimates; compare its held-out results with the released SegFormer benchmark. |
 | Separate condition classifier | Not used by default for V2 | The old V1 crop classifier remains available for baseline comparison; V2 state labels are included in segmentation. |
 | Trust layer | Temperature scaling, ECE/reliability diagram, maximum-softmax OOD baseline, quality/OOD/confidence abstention rule | Turns uncertainty into a reviewable decision. |
 
 ## Training protocol
 
-1. Freeze the 20-class V2 dictionary in `configs/labels.yaml`. Preserve each original V2 label and map only labels with explicit support; retain `coral_condition_unknown`.
+1. Freeze the 7-class V2 dictionary in `configs/labels.yaml`. Map all 95 source labels explicitly in `configs/label_map.json`; report reef metrics over reef classes only and route scene content (water, fish, humans, transect hardware) to the `non_reef` discard sink.
 2. Split by **dive site/source/image group**, not pixels, crops or neighboring video frames. Keep a sealed final test set.
 3. The initial Kaggle run uses pretrained YOLO26n-sem at 1024 px with batch size 4, mixed precision and early stopping. Tune resolution and batch size using validation results, not the sealed test split.
 4. Apply realistic augmentations: horizontal flip, moderate brightness/contrast/hue shift, blur and compression. Do not use transformations that invent bleaching or erase biological color evidence.

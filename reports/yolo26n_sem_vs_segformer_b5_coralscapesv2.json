@@ -1,0 +1,400 @@
+{
+  "dataset": "josauder/coralscapesV2",
+  "split": "official test",
+  "images": 473,
+  "image_shape": [
+    1024,
+    2048
+  ],
+  "project_classes": [
+    "coral_alive",
+    "coral_bleached",
+    "dead_coral",
+    "algae",
+    "hard_substrate",
+    "sand",
+    "non_reef"
+  ],
+  "ground_truth_mapping": "Raw CoralscapesV2 ids are mapped by class name using src/data/v2_label_map.py and configs/labels.yaml; unmapped GT pixels (255) are excluded.",
+  "metric_definition": "Pixel accuracy and macro IoU over valid GT pixels; predictions falling in void/ignored categories count as incorrect. Macro IoU averages classes with nonzero union.",
+  "models": [
+    {
+      "model": "Ultralytics YOLO26n-sem",
+      "checkpoint": "models/checkpoints/yolo26n_sem_v2/weights/best.pt",
+      "images": 473,
+      "protocol": "One aspect-preserving Ultralytics inference pass per 2048x1024 image, imgsz=1024 (long side 1024), FP32. Dense 7-class semantic argmax; no confidence threshold.",
+      "inference_images_measured": 473,
+      "inference_seconds_measured": 12.379179970007272,
+      "seconds_per_image": 0.02617162784356717,
+      "pixel_accuracy": 0.7563709728083187,
+      "mean_iou": 0.519435937453466,
+      "classes_in_miou": 7,
+      "per_class_iou": {
+        "coral_alive": 0.5946526854053303,
+        "coral_bleached": 0.49944256775788304,
+        "dead_coral": 0.12107050475448602,
+        "algae": 0.4529723105908259,
+        "hard_substrate": 0.5282338299798921,
+        "sand": 0.6751112582009966,
+        "non_reef": 0.7645684054848475
+      },
+      "confusion_matrix": [
+        [
+          88853455,
+          274923,
+          2124756,
+          3638361,
+          7452255,
+          78646,
+          7209204,
+          0
+        ],
+        [
+          3183965,
+          5585477,
+          311168,
+          195685,
+          462626,
+          12704,
+          299702,
+          0
+        ],
+        [
+          9791489,
+          205856,
+          5743704,
+          3172680,
+          8569590,
+          17917,
+          1797468,
+          0
+        ],
+        [
+          6365201,
+          104257,
+          1478607,
+          55301934,
+          15551095,
+          735586,
+          11584171,
+          0
+        ],
+        [
+          10601161,
+          272735,
+          13072182,
+          18303859,
+          130964537,
+          3740157,
+          18650438,
+          0
+        ],
+        [
+          295914,
+          76859,
+          26813,
+          252810,
+          6505047,
+          63747043,
+          15934303,
+          0
+        ],
+        [
+          9551428,
+          197465,
+          1128755,
+          5402541,
+          13783416,
+          3000701,
+          287533943,
+          0
+        ]
+      ]
+    },
+    {
+      "model": "Ultralytics YOLO26n-seg",
+      "checkpoint": "models/checkpoints/yolo26n_seg_v2/weights/best.pt",
+      "images": 473,
+      "protocol": "One aspect-preserving Ultralytics inference pass per 2048x1024 image, imgsz=1024, conf=0.25, FP32. Instance masks rasterised to a dense map with highest-confidence-wins; uncovered pixels count as missed predictions.",
+      "confidence_threshold": 0.25,
+      "uncovered_pixel_pct": 43.52085000616803,
+      "inference_images_measured": 473,
+      "inference_seconds_measured": 15.294721693999008,
+      "seconds_per_image": 0.03233556383509304,
+      "pixel_accuracy": 0.52321976059079,
+      "mean_iou": 0.41042410332865015,
+      "classes_in_miou": 7,
+      "per_class_iou": {
+        "coral_alive": 0.6198311912708582,
+        "coral_bleached": 0.366962679706594,
+        "dead_coral": 0.10981191564202891,
+        "algae": 0.18815389564136004,
+        "hard_substrate": 0.2843771820631743,
+        "sand": 0.6898473311022493,
+        "non_reef": 0.6139845278742866
+      },
+      "confusion_matrix": [
+        [
+          77785967,
+          171132,
+          877857,
+          475715,
+          594741,
+          17930,
+          1612381,
+          28095877
+        ],
+        [
+          2202282,
+          3862360,
+          18100,
+          43521,
+          210062,
+          22687,
+          103971,
+          3588344
+        ],
+        [
+          4458851,
+          52435,
+          4078874,
+          553171,
+          3462576,
+          47079,
+          444305,
+          16201413
+        ],
+        [
+          2148712,
+          32476,
+          752852,
+          17994800,
+          6706668,
+          2031201,
+          7530435,
+          53923707
+        ],
+        [
+          2120609,
+          80814,
+          6058816,
+          1867439,
+          60643845,
+          4883524,
+          3635477,
+          116314545
+        ],
+        [
+          22779,
+          1006,
+          2660,
+          6134,
+          2471559,
+          68064434,
+          6017999,
+          10252218
+        ],
+        [
+          4910573,
+          136022,
+          135195,
+          1571901,
+          4200770,
+          4824728,
+          208719630,
+          96099430
+        ]
+      ]
+    },
+    {
+      "model": "SegFormer-B5 fine-tuned on CoralscapesV2 (95 classes)",
+      "model_id": "EPFL-ECEO/segformer-b5-finetuned-coralscapesv2-1024-1024-95_class",
+      "checkpoint": "models/pretrained/segformer-b5-coralscapesv2-95",
+      "device": "cuda",
+      "images": 473,
+      "protocol": "One model-card single-pass inference at 768x1376 per 2048x1024 image (direct resize), then nearest-neighbor resize of the project-class map to source dimensions. Sum softmax probability across fine labels mapped by config id2label names into each project class (void/ignored labels grouped as missed prediction).",
+      "inference_images_measured": 0,
+      "inference_seconds_measured": 0.0,
+      "seconds_per_image": null,
+      "pixel_accuracy": 0.8536107417277157,
+      "mean_iou": 0.6787000705534526,
+      "classes_in_miou": 7,
+      "per_class_iou": {
+        "coral_alive": 0.7513240691210895,
+        "coral_bleached": 0.7162124998888879,
+        "dead_coral": 0.3455873900639055,
+        "algae": 0.5867204375137717,
+        "hard_substrate": 0.7030766211554753,
+        "sand": 0.8046802288831306,
+        "non_reef": 0.8432992472479071
+      },
+      "confusion_matrix": [
+        [
+          99728524,
+          129197,
+          1620656,
+          537644,
+          2958751,
+          81328,
+          4575500,
+          0
+        ],
+        [
+          1463150,
+          7815598,
+          389635,
+          38096,
+          153670,
+          14866,
+          176312,
+          0
+        ],
+        [
+          5137849,
+          301966,
+          13047692,
+          1828139,
+          7822607,
+          58127,
+          1102324,
+          0
+        ],
+        [
+          6393419,
+          93249,
+          2577597,
+          61080087,
+          12992954,
+          1279607,
+          6703938,
+          0
+        ],
+        [
+          4565647,
+          187659,
+          2893843,
+          7117210,
+          162888954,
+          4966015,
+          12985741,
+          0
+        ],
+        [
+          57628,
+          3531,
+          19179,
+          69228,
+          2706870,
+          79341201,
+          4641152,
+          0
+        ],
+        [
+          5487735,
+          145472,
+          955502,
+          3393075,
+          9440310,
+          5360933,
+          295815222,
+          0
+        ]
+      ]
+    },
+    {
+      "model": "DINOv3 ViT-L + LoRA + DPT fine-tuned on CoralscapesV2 (95 classes)",
+      "model_id": "EPFL-ECEO/coralscapesv2-dinov3-vitl-lora-dpt-95_class",
+      "checkpoint": "models/pretrained/coralscapesv2-dinov3-vitl-lora-dpt-95_class",
+      "device": "cuda",
+      "images": 473,
+      "protocol": "One model-card single-pass inference at 768x1376 per 2048x1024 image (direct resize), then nearest-neighbor resize of the project-class map to source dimensions. Sum softmax probability across fine labels mapped by dataset id2label names into each project class (void/ID 0 and unmapped labels grouped as missed prediction).",
+      "inference_images_measured": 0,
+      "inference_seconds_measured": 0.0,
+      "seconds_per_image": null,
+      "pixel_accuracy": 0.8719765335527759,
+      "mean_iou": 0.726519765477972,
+      "classes_in_miou": 7,
+      "per_class_iou": {
+        "coral_alive": 0.8046914380864637,
+        "coral_bleached": 0.8355412454205932,
+        "dead_coral": 0.3750950481712666,
+        "algae": 0.6530227031950544,
+        "hard_substrate": 0.7157800187369138,
+        "sand": 0.8441242400965011,
+        "non_reef": 0.8573836646390114
+      },
+      "confusion_matrix": [
+        [
+          101337709,
+          137817,
+          1092187,
+          663098,
+          2665047,
+          25241,
+          3710501,
+          0
+        ],
+        [
+          606403,
+          8821530,
+          230142,
+          16206,
+          262179,
+          9927,
+          104940,
+          0
+        ],
+        [
+          4552913,
+          165485,
+          13911440,
+          1288225,
+          8350286,
+          11657,
+          1018698,
+          0
+        ],
+        [
+          1490697,
+          52830,
+          2341101,
+          67690343,
+          12095192,
+          2638686,
+          4812002,
+          0
+        ],
+        [
+          3584129,
+          78781,
+          3374613,
+          7549768,
+          166984526,
+          2567808,
+          11465444,
+          0
+        ],
+        [
+          135467,
+          1869,
+          6859,
+          23564,
+          2780121,
+          81011921,
+          2878988,
+          0
+        ],
+        [
+          5932415,
+          69754,
+          744167,
+          2995240,
+          11532393,
+          3879453,
+          295444827,
+          0
+        ]
+      ]
+    }
+  ]
+}

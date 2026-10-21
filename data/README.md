@@ -19,7 +19,7 @@ All data is git-ignored except this README. The folder is organised into tiers:
 - `raw/clips/` — Loose video clips for inference testing
 - `processed/v1_yolo/` — V1 7-class YOLO segmentation dataset
 - `processed/v1_condition_crops/` — V1 condition classifier crops
-- `processed/v2_yolo/` — V2 20-class YOLO dataset (built by `prepare-v2`)
+- `processed/v2_yolo/` — V2 7-class project-taxonomy YOLO dataset (built by `prepare-v2`)
 - `eval/coralscapesv2-test/` — 473-image official test split + id2label
 - `eval/predictions/` — Cached prediction maps keyed by model version
 
