@@ -161,7 +161,7 @@ python main.py app --port 8501
 ```
 Open `http://localhost:8501` in your browser to:
 - Switch backends on the fly (YOLO26n-sem, YOLO26s-sem, YOLO26n-seg, SegFormer-B5, DINOv3-DPT).
-- Upload images or video files with side-by-side segmentation overlays.
+- Upload images or underwater videos with live on-the-fly inference playback, real-time telemetry, and downloadable annotated video streams.
 - Inspect the interactive benthic composition breakdown table and quality gate alerts.
 - Download structured JSON health reports and annotated video streams.
 

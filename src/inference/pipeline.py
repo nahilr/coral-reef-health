@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import inspect
 import json
 import shutil
 import subprocess
 from pathlib import Path
-from typing import Callable
+from typing import Protocol, overload
 import cv2
 import numpy as np
 import torch
@@ -13,6 +14,23 @@ from ultralytics import YOLO
 from src.data.label_map import CLASSES, CLASS_TO_ID, raw_name_to_class, EXCLUDED_FROM_HEALTH
 from src.data.quality import assess_image
 from src.trust.reliability import prediction_uncertainty, review_decision
+
+
+class VideoProgressCallback(Protocol):
+    """Callback accepting either legacy progress or live frame data."""
+
+    @overload
+    def __call__(self, current: int, total: int) -> None: ...
+
+    @overload
+    def __call__(
+        self,
+        current: int,
+        total: int,
+        overlay_bgr: np.ndarray | None,
+        frame_report: dict,
+    ) -> None: ...
+
 
 # BGR colours for the 7-class taxonomy (configs/labels.yaml).
 CLASS_COLORS = np.array([
@@ -655,7 +673,7 @@ class CoralPipeline:
                     output_video_name: str = "annotated_survey.mp4",
                     every_n: int = 1, max_frames: int | None = None,
                     save_frames: bool = False,
-                    progress_callback: Callable[[int, int], None] | None = None) -> dict:
+                    progress_callback: VideoProgressCallback | None = None) -> dict:
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
         cap = cv2.VideoCapture(str(video_path))
@@ -668,9 +686,21 @@ class CoralPipeline:
         fps = float(cap.get(cv2.CAP_PROP_FPS) or 25.0)
         out_fps = float(fps if every_n == 1 else max(1.0, round(fps / every_n, 2)))
 
-        total_to_process = (total_video_frames // max(1, every_n)) if total_video_frames > 0 else 100
+        total_to_process = (
+            (total_video_frames + every_n - 1) // every_n
+            if total_video_frames > 0 else 100
+        )
         if max_frames:
             total_to_process = min(total_to_process, max_frames)
+
+        callback_accepts_live_data = False
+        if progress_callback is not None:
+            try:
+                inspect.signature(progress_callback).bind(0, total_to_process, None, {})
+                callback_accepts_live_data = True
+            except (TypeError, ValueError):
+                # Keep supporting callbacks that only accept (current, total).
+                pass
 
         temp_raw = output_dir / f"temp_{output_video_name}"
         final_video = output_dir / output_video_name
@@ -690,12 +720,16 @@ class CoralPipeline:
                 frame_overlay_path = output_dir / f"frame_{frame_idx:06d}_overlay.jpg" if save_frames else None
                 report = self.infer(frame, save_overlay=frame_overlay_path, return_overlay=True)
                 report["frame_index"] = frame_idx
-                if "overlay_image" in report and report["overlay_image"] is not None:
-                    writer.write(report["overlay_image"])
+                overlay_img = report.get("overlay_image")
+                if overlay_img is not None:
+                    writer.write(overlay_img)
                     del report["overlay_image"]
                 reports.append(report)
                 if progress_callback:
-                    progress_callback(len(reports), total_to_process)
+                    if callback_accepts_live_data:
+                        progress_callback(len(reports), total_to_process, overlay_img, report)
+                    else:
+                        progress_callback(len(reports), total_to_process)
             frame_idx += 1
         cap.release()
         writer.release()

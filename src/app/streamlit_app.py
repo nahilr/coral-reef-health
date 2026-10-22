@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-import json
 import gc
-import tempfile
+import hashlib
+import json
 import sys
+import tempfile
 from pathlib import Path
 
 # Add repository root explicitly so imports work regardless of launch directory
@@ -255,41 +256,133 @@ else:
         if not Path(model_path).exists():
             st.error(f"Checkpoint not found: {model_path}.")
         else:
-            progress_bar = st.progress(0, text="Initializing video inference...")
-            with tempfile.TemporaryDirectory() as tmp:
-                video_path = Path(tmp) / uploaded_video.name
-                video_path.write_bytes(uploaded_video.getbuffer())
-                out_dir = Path(tmp) / "video_out"
+            video_digest = hashlib.sha256(uploaded_video.getbuffer()).hexdigest()
+            cache_key = (
+                f"survey_{video_digest}_{model_path}_{conf_thresh}_{img_size}_"
+                f"{every_n}_{max_frames}"
+            )
 
-                pipeline = load_pipeline(model_path, conf_thresh, img_size, model_type)
+            cached = st.session_state.get("_video_survey_cache")
+            if cached is not None and cached.get("cache_key") != cache_key:
+                st.session_state.pop("_video_survey_cache", None)
+                cached = None
 
-                def _progress_cb(current: int, total: int):
-                    frac = min(1.0, current / max(1, total))
-                    progress_bar.progress(frac, text=f"Processing frame {current} of ~{total} ({int(frac * 100)}%)...")
+            if cached is None:
+                live_container = st.container()
+                with live_container:
+                    st.markdown("### 🔄 Live Video Inference")
+                    status_box = st.empty()
+                    prog_bar = st.progress(0, text="Initializing video inference engine...")
+                    telemetry_box = st.empty()
+                    viewport_box = st.empty()
 
-                result = pipeline.infer_video(
-                    video_path, out_dir, every_n=every_n, max_frames=max_frames,
-                    save_frames=True, progress_callback=_progress_cb
+                with tempfile.TemporaryDirectory() as tmp:
+                    video_path = Path(tmp) / uploaded_video.name
+                    video_path.write_bytes(uploaded_video.getbuffer())
+                    out_dir = Path(tmp) / "video_out"
+
+                    pipeline = load_pipeline(model_path, conf_thresh, img_size, model_type)
+
+                    def _progress_cb(current: int, total: int, overlay_bgr=None, frame_report=None):
+                        frac = min(1.0, current / max(1, total))
+                        pct = int(frac * 100)
+                        f_idx = frame_report.get("frame_index", current) if frame_report else current
+                        status_box.markdown(f"**Analyzing frame {current} of ~{total}** ({pct}%) &nbsp;|&nbsp; *Video frame #{f_idx}*")
+                        prog_bar.progress(frac, text=f"Processing survey video: {pct}% complete")
+
+                        if overlay_bgr is not None:
+                            viewport_box.image(
+                                overlay_bgr,
+                                channels="BGR",
+                                caption=f"Live Processing Viewport — Frame #{f_idx}",
+                                width="stretch",
+                            )
+
+                        if frame_report:
+                            h = frame_report.get("health_indicators", {})
+                            rel = frame_report.get("reliability", {})
+                            lcc = h.get("live_coral_cover_pct", 0.0)
+                            bleaching_ratio = h.get("bleaching_ratio_pct", 0.0)
+                            algae = h.get("algae_covered_cover_pct", h.get("macroalgae_cover_pct", 0.0))
+                            cat = h.get("reef_health_category", "Assessing...")
+                            status = rel.get("status", "pending").upper()
+
+                            with telemetry_box.container():
+                                m1, m2, m3, m4 = st.columns(4)
+                                m1.metric("Live Coral Cover", f"{lcc:.1f}%")
+                                m2.metric("Bleaching Ratio", f"{bleaching_ratio:.1f}%")
+                                m3.metric("Macroalgae", f"{algae:.1f}%")
+                                m4.metric("Frame Health / Trust", f"{cat}", delta=f"Trust: {status}",
+                                          delta_color="normal" if status == "ACCEPTED" else "inverse")
+
+                    result = pipeline.infer_video(
+                        video_path, out_dir, every_n=every_n, max_frames=max_frames,
+                        save_frames=True, progress_callback=_progress_cb
+                    )
+                    prog_bar.progress(1.0, text="Finalizing video encoding...")
+
+                    video_output_bytes = None
+                    if result.get("annotated_video") and Path(result["annotated_video"]).exists():
+                        video_output_bytes = Path(result["annotated_video"]).read_bytes()
+
+                    overlays = sorted(out_dir.glob("*_overlay.jpg"))[:6]
+                    overlay_images = [cv2.cvtColor(cv2.imread(str(p)), cv2.COLOR_BGR2RGB) for p in overlays if p.exists()]
+                    overlay_names = [p.name for p in overlays if p.exists()]
+
+                live_container.empty()
+                st.session_state["_video_survey_cache"] = {
+                    "cache_key": cache_key,
+                    "result": result,
+                    "video_bytes": video_output_bytes,
+                    "overlay_images": overlay_images,
+                    "overlay_names": overlay_names,
+                }
+
+            cached = st.session_state["_video_survey_cache"]
+            result = cached["result"]
+            summary = result["summary"]
+            video_output_bytes = cached["video_bytes"]
+            overlay_images = cached["overlay_images"]
+            overlay_names = cached["overlay_names"]
+
+            st.success("✅ **Video processing complete.** Survey assessment ready.")
+
+            header_col, action_col = st.columns([4, 1])
+            with header_col:
+                st.subheader(f"Survey Assessment: {summary.get('overall_health_category', 'Assessed')}")
+            with action_col:
+                if st.button("🔄 Re-process"):
+                    st.session_state.pop("_video_survey_cache", None)
+                    st.rerun()
+
+            if summary.get("status") == "accepted":
+                st.success(
+                    f"🛡️ **Survey Trust Status: ACCEPTED** — {summary.get('accepted_frames', 0)} of {summary.get('total_frames', 0)} frames "
+                    f"met strict quality & reliability thresholds ({summary.get('accepted_frame_ratio', 1.0)*100:.1f}%)."
                 )
-                progress_bar.progress(1.0, text="Finalizing video encoding...")
-                summary = result["summary"]
+            else:
+                st.warning(
+                    f"⚠️ **Survey Trust Status: NEEDS REVIEW** — {summary.get('accepted_frames', 0)} of {summary.get('total_frames', 0)} frames "
+                    f"met reliability thresholds. Review individual flagged frames before logging survey."
+                )
 
-                video_output_bytes = None
-                if result.get("annotated_video") and Path(result["annotated_video"]).exists():
-                    video_output_bytes = Path(result["annotated_video"]).read_bytes()
-
-                overlays = sorted(out_dir.glob("*_overlay.jpg"))[:6]
-                overlay_images = [cv2.cvtColor(cv2.imread(str(p)), cv2.COLOR_BGR2RGB) for p in overlays if p.exists()]
-            progress_bar.empty()
-
-            st.subheader(f"Survey Assessment: {summary.get('overall_health_category', 'Assessed')}")
-            vcol1, vcol2, vcol3 = st.columns(3)
+            vcol1, vcol2, vcol3, vcol4 = st.columns(4)
             with vcol1:
-                st.metric("Accepted Frames", f"{summary['accepted_frames']} / {summary['total_frames']}")
+                st.metric("Accepted Frames", f"{summary.get('accepted_frames', 0)} / {summary.get('total_frames', 0)}")
             with vcol2:
-                st.metric("Survey Mean Live Coral Cover", f"{summary['aggregated_health_metrics']['mean_live_coral_cover_pct']}%")
+                st.metric("Mean Live Coral Cover", f"{summary.get('aggregated_health_metrics', {}).get('mean_live_coral_cover_pct', 0.0)}%")
             with vcol3:
-                st.metric("Survey Mean Bleaching Ratio", f"{summary['aggregated_health_metrics']['mean_bleaching_ratio_pct']}%")
+                st.metric("Mean Bleaching Ratio", f"{summary.get('aggregated_health_metrics', {}).get('mean_bleaching_ratio_pct', 0.0)}%")
+            with vcol4:
+                st.metric("Mean Macroalgae Cover", f"{summary.get('aggregated_health_metrics', {}).get('mean_macroalgae_cover_pct', 0.0)}%")
+
+            with st.expander("📊 Survey Benthic Composition Breakdown", expanded=False):
+                comp = summary.get("mean_benthic_composition", {})
+                comp_df = pd.DataFrame([
+                    {"Class": k.replace("_", " ").title(), "Mean Area Fraction (%)": round(v * 100, 2)}
+                    for k, v in comp.items()
+                ])
+                st.dataframe(comp_df, width="stretch")
 
             if video_output_bytes:
                 st.subheader("Annotated Video Stream")
@@ -303,7 +396,7 @@ else:
 
             if overlay_images:
                 st.subheader("Sampled Keyframe Overlays")
-                st.image(overlay_images, caption=[p.name for p in overlays], width=350)
+                st.image(overlay_images, caption=overlay_names, width=350)
 
             st.download_button(
                 "📥 Download Video Survey Report (JSON)",
