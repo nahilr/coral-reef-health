@@ -86,12 +86,11 @@ def review_decision(quality: dict, confidence: float | None, coverage: float,
     """Evaluate whether an analysis result meets trustworthiness criteria or requires review.
 
     ``confidence`` and ``uncertainty`` may be ``None`` when the backend cannot
-    produce them (e.g. a semantic model that only returns class IDs). Those
-    checks are then skipped instead of failing on a fabricated zero, which used
-    to force every such result into ``needs_review`` regardless of its content.
+    expose them (e.g. an exported model whose output already contains class IDs).
+    Those checks are skipped instead of failing on a fabricated zero.
     """
     default_thresholds = {
-        "confidence": 0.22,      # Minimum mean confidence across detections
+        "confidence": 0.22,      # Minimum mean confidence when the backend exposes scores
         "coverage": 0.05,        # Minimum benthic coverage required
         "uncertainty": 0.90,     # Maximum allowed prediction uncertainty
     }

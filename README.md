@@ -343,14 +343,14 @@ The project collapses the fine-grained, long-tailed Coralscapes classes into **7
 ### Fine-Grained Label Mapping Logic
 
 The mapping is explicitly defined in `configs/label_map.json`:
-- **Coral Condition Preservation**: `acropora bleached` $\rightarrow$ `coral_bleached`, `massive dead` $\rightarrow$ `coral_dead`, `brain coral alive` $\rightarrow$ `coral_alive`.
-- **Substrate Unification**: `rubble`, `hard substrate`, `dead giant clam` $\rightarrow$ `hard_substrate`.
-- **Algae Aggregation**: `algae covered substrate`, `algae covered table acropora` $\rightarrow$ `algae`.
-- **Non-Benthic Sinks**: `fish`, `sea cucumber`, `water column`, `transect line`, `trash` $\rightarrow$ `non_reef`.
+- **Coral Condition Preservation**: `acropora bleached` → `coral_bleached`, `massive dead` → `coral_dead`, `brain coral alive` → `coral_alive`.
+- **Substrate Unification**: `rubble`, `hard substrate`, `dead giant clam` → `hard_substrate`.
+- **Algae Aggregation**: `algae covered substrate`, `algae covered table acropora` → `algae`.
+- **Non-Benthic Sinks**: `fish`, `sea cucumber`, `water column`, `transect line`, `trash` → `non_reef`.
 
 ### Component-Derived Instance Polygons
 
-In `src/data/prepare.py`, binary class masks are processed via `cv2.findContours(..., cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)`. Polygons are filtered to a minimum area threshold and normalized to $[0, 1]$ coordinates for training instance segmentation backends (`yolo26n_seg`).
+In `src/data/prepare.py`, binary class masks are processed via `cv2.findContours(..., cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)`. Polygons are filtered to a minimum area threshold and normalized to [0, 1] coordinates for training instance segmentation backends (`yolo26n_seg`).
 
 ---
 
@@ -360,16 +360,16 @@ In `src/data/prepare.py`, binary class masks are processed via `cv2.findContours
 
 Quantitative indicators are computed by `compute_health_indicators()` in `src/inference/pipeline.py`:
 
-$$\text{Reef Substrate Area} = \text{Total Valid Pixels} - \text{Pixels}(\text{non\_reef})$$
+$$\text{Reef Substrate Area} = \text{Total Valid Pixels} - \text{Pixels}(\text{non-reef})$$
 
 1. **Live Coral Cover (LCC %)**:
-   $$\text{LCC} = \frac{\text{Pixels}(\text{coral\_alive})}{\text{Reef Substrate Area}} \times 100$$
+   $$\text{LCC} = \frac{\text{Pixels}(\text{coral-alive})}{\text{Reef Substrate Area}} \times 100$$
 2. **Bleaching Ratio (%)**:
-   $$\text{Bleaching Ratio} = \frac{\text{Pixels}(\text{coral\_bleached})}{\text{Pixels}(\text{coral\_alive}) + \text{Pixels}(\text{coral\_bleached}) + \text{Pixels}(\text{coral\_dead})} \times 100$$
+   $$\text{Bleaching Ratio} = \frac{\text{Pixels}(\text{coral-bleached})}{\text{Pixels}(\text{coral-alive}) + \text{Pixels}(\text{coral-bleached}) + \text{Pixels}(\text{coral-dead})} \times 100$$
 3. **Mortality Ratio (%)**:
-   $$\text{Mortality Ratio} = \frac{\text{Pixels}(\text{coral\_dead})}{\text{Pixels}(\text{coral\_alive}) + \text{Pixels}(\text{coral\_bleached}) + \text{Pixels}(\text{coral\_dead})} \times 100$$
+   $$\text{Mortality Ratio} = \frac{\text{Pixels}(\text{coral-dead})}{\text{Pixels}(\text{coral-alive}) + \text{Pixels}(\text{coral-bleached}) + \text{Pixels}(\text{coral-dead})} \times 100$$
 4. **Coral-to-Algae Competition Ratio**:
-   $$\text{Coral-to-Algae Ratio} = \frac{\text{Pixels}(\text{coral\_alive})}{\max(1, \text{Pixels}(\text{algae}))}$$
+   $$\text{Coral-to-Algae Ratio} = \frac{\text{Pixels}(\text{coral-alive})}{\max(1, \text{Pixels}(\text{algae}))}$$
 
 ---
 
@@ -380,30 +380,30 @@ $$\text{Verdict} = \mathbf{Category} \quad [\mathbf{Condition}]$$
 
 #### Category Divisioning & LCC Thresholds
 The base category follows the international Reef Check / Gomez et al. standard:
-- **`Excellent`**: Live Coral Cover $\ge 50.0\%$
-- **`Good`**: Live Coral Cover $25.0\% - 49.9\%$
-- **`Fair`**: Live Coral Cover $10.0\% - 24.9\%$
-- **`Poor / Degraded`**: Live Coral Cover $< 10.0\%$
-- **`Indeterminate`**: No reef substrate detected in frame ($0\%$ benthic area).
+- **`Excellent`**: Live Coral Cover ≥ 50.0%
+- **`Good`**: Live Coral Cover 25.0% – 49.9%
+- **`Fair`**: Live Coral Cover 10.0% – 24.9%
+- **`Poor / Degraded`**: Live Coral Cover < 10.0%
+- **`Indeterminate`**: No reef substrate detected in frame (0% benthic area).
 
 #### Condition Disturbance Divisioning & Capping Guardrail
 When thermal stress or mortality is detected, disturbance flags are raised and **cap** the reported health tier downwards. **Disturbance can only lower a tier, never raise it.**
 
 | Disturbance Axis | Ratio Range | Condition Label | Maximum Allowed Tier |
 |---|:---:|---|:---:|
-| **Bleaching** | $10\% - 25\%$ | `Moderate Bleaching Warning` | **Good** |
-| | $25\% - 50\%$ | `Severe Bleaching Alert` | **Fair** |
-| | $\ge 50\%$ | `Extensive Bleaching` | **Poor / Degraded** |
-| **Mortality** | $10\% - 25\%$ | `Elevated Mortality` | **Good** |
-| | $25\% - 50\%$ | `High Mortality` | **Fair** |
-| | $\ge 50\%$ | `Extensive Mortality` | **Poor / Degraded** |
-| **Algae Overgrowth** | Algae $> 30\%$ and Algae $>$ LCC | `Algae-Covered Area Warning` | Preserves tier, flags phase shift |
+| **Bleaching** | 10% – 25% | `Moderate Bleaching Warning` | **Good** |
+| | 25% – 50% | `Severe Bleaching Alert` | **Fair** |
+| | ≥ 50% | `Extensive Bleaching` | **Poor / Degraded** |
+| **Mortality** | 10% – 25% | `Elevated Mortality` | **Good** |
+| | 25% – 50% | `High Mortality` | **Fair** |
+| | ≥ 50% | `Extensive Mortality` | **Poor / Degraded** |
+| **Algae Overgrowth** | Algae > 30% and Algae > LCC | `Algae-Covered Area Warning` | Preserves tier, flags phase shift |
 
 #### Real-World Verdict Combination Examples
-- `REEF HEALTH: Excellent`: LCC $\ge 50\%$, bleaching $< 10\%$, mortality $< 10\%$.
-- `REEF HEALTH: Good [Stable]`: LCC $= 38\%$, bleaching $< 10\%$, mortality $< 10\%$.
-- `REEF HEALTH: Fair [Severe Bleaching Alert]`: LCC would be Good ($32\%$), but capped to Fair because $30\%$ of all coral is bleached.
-- `REEF HEALTH: Poor / Degraded [Extensive Mortality]`: Capped to degraded because $> 50\%$ of colonies are dead.
+- `REEF HEALTH: Excellent`: LCC ≥ 50%, bleaching < 10%, mortality < 10%.
+- `REEF HEALTH: Good [Stable]`: LCC = 38%, bleaching < 10%, mortality < 10%.
+- `REEF HEALTH: Fair [Severe Bleaching Alert]`: LCC would be Good (32%), but capped to Fair because 30% of all coral is bleached.
+- `REEF HEALTH: Poor / Degraded [Extensive Mortality]`: Capped to degraded because > 50% of colonies are dead.
 - `REEF HEALTH: Fair [Moderate Bleaching Warning; Algae-Covered Area Warning]`: Concurrently experiencing thermal stress and macroalgal dominance.
 
 ---
@@ -445,13 +445,13 @@ Every inference pass executes automated verification (`src/trust/reliability.py`
 
 ### Image Quality Assessment Thresholds
 Implemented in `src/data/quality.py`:
-- **Laplacian Blur Variance**: flags blur when variance $< 12.0$.
-- **Luminance Exposure**: flags under/over-exposure when mean luminance $\notin [25, 235]$.
-- **Contrast Deviation**: flags low contrast when standard deviation $< 18.0$.
-- **Underwater Color Cast**: flags color cast when max/min channel mean ratio $> 2.2$.
+- **Laplacian Blur Variance**: flags blur when variance < 12.0.
+- **Luminance Exposure**: flags under/over-exposure when mean luminance ∉ [25, 235].
+- **Contrast Deviation**: flags low contrast when standard deviation < 18.0.
+- **Underwater Color Cast**: flags color cast when max/min channel mean ratio > 2.2.
 
 ### Uncertainty & Coverage Floors
-- **Benthic Coverage**: flags `low_predicted_coverage` if assessable seafloor $< 5.0\%$.
+- **Benthic Coverage**: flags `low_predicted_coverage` if assessable seafloor < 5.0%.
 - **Shannon Entropy / Confidence**: flags `low_confidence` or `high_uncertainty` when model probabilities fall below calibration thresholds.
 
 ### Auditable Decision States
@@ -481,7 +481,7 @@ See [model_comparison.md](model_comparison.md) for per-class scores, health-outp
 ### Evaluation Protocol & Benchmarking Methodology
 
 Evaluations in `scripts/evaluate_model_comparison.py` adhere to strict reproducibility guidelines:
-1. **Official Split Only**: Evaluated on all 473 official Coralscapes test images at $2048 \times 1024$ source resolution.
+1. **Official Split Only**: Evaluated on all 473 official Coralscapes test images at 2048 × 1024 source resolution.
 2. **Logit Folding**: Dense models outputting 95 raw classes have fine probabilities summed into the 7 project classes before taking the argmax.
 3. **Void Pixel Handling**: Any pixel predicted as void/unmapped counts as an incorrect (missed) prediction.
 4. **Macro mIoU Calculation**: Macro IoU averages classes with a non-zero union over valid ground-truth pixels.
@@ -546,10 +546,10 @@ Evaluations in `scripts/evaluate_model_comparison.py` adhere to strict reproduci
 
 | Term / Abbreviation | Full Name | Definition & Ecological Relevance |
 |---|---|---|
-| **LCC (%)** | Live Coral Cover Percentage | The primary metric in coral reef ecology: $\frac{\text{Live Coral Pixels}}{\text{Reef Substrate Area}} \times 100\%$. Measures living, non-bleached reef-building coral. |
-| **Bleaching Ratio (%)** | Coral Bleaching Proportion | Ratio of bleached coral to total coral colony area: $\frac{\text{Bleached}}{\text{Alive} + \text{Bleached} + \text{Dead}} \times 100\%$. Primary signal for marine heatwaves. |
-| **Mortality Ratio (%)** | Coral Mortality Proportion | Ratio of dead coral structure to total coral colony area: $\frac{\text{Dead}}{\text{Alive} + \text{Bleached} + \text{Dead}} \times 100\%$. Indicates recent or chronic mortality. |
-| **Coral-to-Algae Ratio** | Competition Index | Ratio of live coral pixels to algal pixels. A ratio $< 1.0$ indicates algal dominance and potential phase shift. |
+| **LCC (%)** | Live Coral Cover Percentage | The primary metric in coral reef ecology: $`\frac{\text{Live Coral Pixels}}{\text{Reef Substrate Area}} \times 100\%`$. Measures living, non-bleached reef-building coral. |
+| **Bleaching Ratio (%)** | Coral Bleaching Proportion | Ratio of bleached coral to total coral colony area: $`\frac{\text{Bleached}}{\text{Alive} + \text{Bleached} + \text{Dead}} \times 100\%`$. Primary signal for marine heatwaves. |
+| **Mortality Ratio (%)** | Coral Mortality Proportion | Ratio of dead coral structure to total coral colony area: $`\frac{\text{Dead}}{\text{Alive} + \text{Bleached} + \text{Dead}} \times 100\%`$. Indicates recent or chronic mortality. |
+| **Coral-to-Algae Ratio** | Competition Index | Ratio of live coral pixels to algal pixels. A ratio < 1.0 indicates algal dominance and potential phase shift. |
 | **Benthos / Benthic** | Seafloor Substrate | The ecological zone at the seabed, comprising living coral, hard substrate, sand, and flora attached to the ocean bottom. |
 | **Reef Substrate Denominator** | Assessable Seafloor Area | Total valid image pixels minus open water column, fish, and hardware. Prevents water from deflating coral percentages. |
 
@@ -560,7 +560,7 @@ Evaluations in `scripts/evaluate_model_comparison.py` adhere to strict reproduci
 | Metric | Full Name | Definition |
 |---|---|---|
 | **Macro mIoU** | Mean Intersection over Union | Area of overlap between prediction and ground truth divided by area of union, averaged equally across all valid classes. |
-| **Pixel Accuracy** | Global Pixel Accuracy | Percentage of valid pixels correctly classified: $\frac{\sum \text{True Positives}}{\text{Total Valid Pixels}}$. |
+| **Pixel Accuracy** | Global Pixel Accuracy | Percentage of valid pixels correctly classified: $`\frac{\sum \text{True Positives}}{\text{Total Valid Pixels}}`$. |
 | **ECE** | Expected Calibration Error | Difference between model confidence and actual accuracy across binned confidence intervals; measures reliability. |
 | **Mask mAP@50** | Mask Mean Average Precision | Instance segmentation precision evaluated at an IoU threshold of 0.50 over predicted polygon masks. |
 
@@ -570,7 +570,7 @@ Evaluations in `scripts/evaluate_model_comparison.py` adhere to strict reproduci
 
 | Architecture / Term | Paradigm | Description |
 |---|---|---|
-| **Semantic Segmentation (`sem`)** | Dense Pixel Classification | Classifies every pixel $(x, y)$ in the image into one of 7 classes; ideal for calculating benthic surface areas. |
+| **Semantic Segmentation (`sem`)** | Dense Pixel Classification | Classifies every pixel (x, y) in the image into one of 7 classes; ideal for calculating benthic surface areas. |
 | **Instance Segmentation (`seg`)** | Object Detection + Polygons | Predicts discrete bounding boxes and polygon masks per colony; ideal for colony counting and size profiling. |
 | **DINOv3 ViT-L + DPT** | Vision Foundation Model | Large vision transformer with Low-Rank Adaptation (LoRA) and Dense Prediction Transformer (DPT) head. |
 | **SegFormer-B5** | Hierarchical Transformer | Transformer architecture designed for dense semantic segmentation at high resolution. |
@@ -583,6 +583,6 @@ Evaluations in `scripts/evaluate_model_comparison.py` adhere to strict reproduci
 | Term | Concept | Operational Role |
 |---|---|---|
 | **Quality Gate** | Pre-Inference Screening | Algorithms checking blur variance, luminance exposure, contrast, and color cast before model execution. |
-| **Normalized Shannon Entropy** | Prediction Uncertainty | Multi-class prediction entropy normalized to $[0, 1]$; flags ambiguous or unfamiliar underwater scenes. |
+| **Normalized Shannon Entropy** | Prediction Uncertainty | Multi-class prediction entropy normalized to [0, 1]; flags ambiguous or unfamiliar underwater scenes. |
 | **Abstention / Review Flag** | Safe AI Fallback | Automatically routing uncertain or low-quality imagery to expert human review rather than outputting false data. |
 | **Condition Capping** | Ecological Safety Guardrail | Rule-based constraint preventing a heavily bleached or dead reef assemblage from being graded as "Healthy" or "Excellent". |

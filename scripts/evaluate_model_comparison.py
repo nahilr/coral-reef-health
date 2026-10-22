@@ -89,7 +89,10 @@ def update_cm(cm: np.ndarray, truth: np.ndarray, pred: np.ndarray) -> None:
 
 
 def dataset_paths() -> list[tuple[Path, Path]]:
-    images = sorted((TEST_ROOT / "images").glob("test_*.jpg"))
+    images = sorted([
+        *(TEST_ROOT / "images").glob("test_*.jpg"),
+        *(TEST_ROOT / "images").glob("test_*.png"),
+    ])
     pairs = []
     for image in images:
         mask = TEST_ROOT / "masks" / f"{image.stem}.png"
