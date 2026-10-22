@@ -56,6 +56,63 @@ _TIER_ORDER = ("Excellent", "Good", "Fair", "Poor / Degraded")
 _CONDITION_CAPS = {0: None, 1: "Good", 2: "Fair", 3: "Poor / Degraded"}
 
 
+def _confidence_semantic_predictor_class(temperature: float = 1.0, retain_logits: bool = False):
+    """Build an Ultralytics predictor that retains dense semantic scores.
+
+    Ultralytics' public ``semantic_mask`` is an argmax class map. Its semantic
+    predictor receives logits before that argmax, so retain per-pixel
+    probabilities there while preserving Ultralytics' own resize/letterbox
+    handling for the class map.
+    """
+    from ultralytics.models.yolo.semantic.predict import SemanticSegmentationPredictor
+    from ultralytics.utils import ops
+
+    class ConfidenceSemanticPredictor(SemanticSegmentationPredictor):
+        def postprocess(self, preds, img, orig_imgs):
+            raw = preds[0] if isinstance(preds, (tuple, list)) else preds
+            results = super().postprocess(preds, img, orig_imgs)
+
+            # Exported graphs may bake argmax into the model, leaving only a
+            # [B,H,W] class map. Confidence cannot be recovered in that case.
+            if not isinstance(raw, torch.Tensor) or raw.ndim != 4:
+                for result in results:
+                    result.semantic_confidence = None
+                    result.semantic_uncertainty = None
+                return results
+
+            for index, result in enumerate(results):
+                logits = raw[index : index + 1].float()
+                if logits.shape[2:] != img.shape[2:]:
+                    logits = torch.nn.functional.interpolate(
+                        logits, size=img.shape[2:], mode="bilinear", align_corners=False
+                    )
+                logits = ops.scale_masks(logits, result.orig_shape)[0]
+
+                if logits.shape[0] == 1:
+                    scaled_logits = logits[0] / max(float(temperature), 1e-6)
+                    positive = torch.sigmoid(scaled_logits)
+                    confidence = torch.where(scaled_logits >= 0, positive, 1.0 - positive)
+                    probabilities = torch.cat((1.0 - positive[None], positive[None]), dim=0)
+                else:
+                    probabilities = (logits / max(float(temperature), 1e-6)).softmax(dim=0)
+                    confidence = probabilities.max(dim=0).values
+
+                class_map = result.semantic_mask.data
+                valid = class_map != 255
+                if bool(valid.any()):
+                    entropy = -(probabilities.clamp_min(1e-8) * probabilities.clamp_min(1e-8).log()).sum(dim=0)
+                    entropy = entropy / np.log(probabilities.shape[0]) if probabilities.shape[0] > 1 else entropy
+                    result.semantic_uncertainty = float(entropy[valid].mean().clamp(0.0, 1.0).item())
+                else:
+                    result.semantic_uncertainty = 1.0
+                result.semantic_confidence = confidence.detach().cpu().numpy().astype(np.float32)
+                result.semantic_logits = logits.detach().cpu() if retain_logits else None
+
+            return results
+
+    return ConfidenceSemanticPredictor
+
+
 def _worse_tier(a: str, b: str) -> str:
     return _TIER_ORDER[max(_TIER_ORDER.index(a), _TIER_ORDER.index(b))]
 
@@ -234,6 +291,7 @@ class CoralPipeline:
         self.conf = conf
         self.thresholds = thresholds
         self.model_type = model_type
+        self.semantic_temperature = 1.0
         self.model = None
         self.class_names = CLASSES
         self.colors = CLASS_COLORS
@@ -266,6 +324,13 @@ class CoralPipeline:
             self.model_task = getattr(self.model, "task", "segment")
             model_names = self.model.names
             self.class_names = [model_names[i] for i in range(len(model_names))] if isinstance(model_names, dict) else list(model_names)
+            if self.model_task == "semantic":
+                calibration_path = Path(self.model_path).parent.parent / "reliability_calibration.json"
+                if calibration_path.is_file():
+                    calibration = json.loads(calibration_path.read_text())
+                    self.semantic_temperature = float(calibration.get("temperature", 1.0))
+                    if thresholds is None:
+                        self.thresholds = calibration.get("thresholds")
         else:
             raise ValueError(f"Unsupported model_type: {model_type}")
 
@@ -315,8 +380,16 @@ class CoralPipeline:
             )
             semantic_output = semantic_map
         else:
-            result = self.model.predict(source=image, imgsz=self.imgsz, conf=self.conf, verbose=False)[0]
+            predict_args = {"source": image, "imgsz": self.imgsz, "conf": self.conf, "verbose": False}
+            if self.model_task == "semantic":
+                predict_args["predictor"] = _confidence_semantic_predictor_class(
+                    temperature=self.semantic_temperature
+                )
+            result = self.model.predict(**predict_args)[0]
             semantic_output = getattr(result, "semantic_mask", None)
+            if semantic_output is not None:
+                semantic_confidence = getattr(result, "semantic_confidence", None)
+                dense_uncertainty = getattr(result, "semantic_uncertainty", None)
 
         height, width = image.shape[:2]
         class_map = np.full((height, width), -1, dtype=np.int16)
