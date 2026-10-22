@@ -18,6 +18,7 @@ import cv2
 from ultralytics import YOLO
 from src.inference.pipeline import CoralPipeline
 from src.inference.dinov3_dpt import is_dinov3_dpt
+from src.data.image_metadata import extract_image_metadata, extract_video_metadata
 
 st.set_page_config(
     page_title="AI Coral Reef Health Assessment",
@@ -140,10 +141,37 @@ def load_pipeline(ckpt_path: str, conf: float, imgsz: int, selected_type: str):
     )
 
 
+# --- Location metadata integration ---
+def _render_location_section(metadata: dict) -> None:
+    """Render only explicitly recorded location metadata; never infer from pixels."""
+    st.markdown("---")
+    st.subheader("Location")
+    location = metadata.get("location", {}) if isinstance(metadata, dict) else {}
+    if location.get("available"):
+        st.success(f"📍 {location.get('display') or location.get('name') or 'Location metadata found'}")
+        latitude = location.get("latitude")
+        longitude = location.get("longitude")
+        if latitude is not None and longitude is not None:
+            col_lat, col_lon = st.columns(2)
+            col_lat.metric("Latitude", f"{float(latitude):.6f}")
+            col_lon.metric("Longitude", f"{float(longitude):.6f}")
+            st.markdown(f"[Open coordinates in Google Maps](https://www.google.com/maps?q={float(latitude)},{float(longitude)})")
+        if location.get("source"):
+            st.caption(f"Source: {location['source']}")
+    else:
+        st.info("No location available")
+        st.caption("No recorded GPS coordinates or matching location label were found. The location is not guessed from image pixels or video frames.")
+
 mode = st.radio("Input Modality", ["Single Image", "Underwater Video"], horizontal=True)
 
 if mode == "Single Image":
     uploaded = st.file_uploader("Upload an underwater reef image", type=["jpg", "jpeg", "png"])
+    uploaded_image_metadata = st.file_uploader(
+        "Optional matching image label/metadata file",
+        type=["json", "yaml", "yml", "csv", "xml", "txt"],
+        help="Upload a matching label/metadata file containing a site, island, atoll, latitude, or longitude.",
+        key="image_location_metadata",
+    )
     if uploaded:
         if not Path(model_path).exists():
             st.error(f"Checkpoint not found: {model_path}. Please train or download model weights.")
@@ -156,6 +184,17 @@ if mode == "Single Image":
 
                     pipeline = load_pipeline(model_path, conf_thresh, img_size, model_type)
                     report = pipeline.infer(image_path, overlay_path)
+                    image_label_path = None
+                    if uploaded_image_metadata is not None:
+                        image_label_path = Path(tmp) / Path(uploaded_image_metadata.name).name
+                        image_label_path.write_bytes(uploaded_image_metadata.getbuffer())
+                    image_metadata = extract_image_metadata(
+                        image_path,
+                        label_path=image_label_path,
+                        search_roots=[REPO_ROOT, REPO_ROOT / "data", REPO_ROOT / "labels", REPO_ROOT / "annotations"],
+                    )
+                    report["image_metadata"] = image_metadata
+                    _render_location_section(image_metadata)
 
                     # 1. Trust & Reliability Banner
                     rel = report["reliability"]
@@ -239,6 +278,12 @@ if mode == "Single Image":
 
 else:
     uploaded_video = st.file_uploader("Upload an underwater survey video", type=["mp4", "avi", "mov", "mkv"])
+    uploaded_video_metadata = st.file_uploader(
+        "Optional matching video label/metadata file",
+        type=["json", "yaml", "yml", "csv", "xml", "txt"],
+        help="Upload a matching per-video metadata/label file, or a manifest with video filename/ID and location fields.",
+        key="video_location_metadata",
+    )
     vcol_a, vcol_b = st.columns(2)
     with vcol_a:
         every_n = st.slider("Process Every N Frames (1 = full video)", 1, 60, 2,
@@ -340,6 +385,19 @@ else:
 
             cached = st.session_state["_video_survey_cache"]
             result = cached["result"]
+            # Read source-video metadata even when inference results came from the session cache.
+            with tempfile.TemporaryDirectory() as metadata_tmp:
+                metadata_video_path = Path(metadata_tmp) / Path(uploaded_video.name).name
+                metadata_video_path.write_bytes(uploaded_video.getbuffer())
+                video_label_path = None
+                if uploaded_video_metadata is not None:
+                    video_label_path = Path(metadata_tmp) / Path(uploaded_video_metadata.name).name
+                    video_label_path.write_bytes(uploaded_video_metadata.getbuffer())
+                result["video_metadata"] = extract_video_metadata(
+                    metadata_video_path,
+                    label_path=video_label_path,
+                    search_roots=[REPO_ROOT, REPO_ROOT / "data", REPO_ROOT / "labels", REPO_ROOT / "annotations"],
+                )
             summary = result["summary"]
             video_output_bytes = cached["video_bytes"]
             overlay_images = cached["overlay_images"]
@@ -347,6 +405,8 @@ else:
 
             st.success("✅ **Video processing complete.** Survey assessment ready.")
 
+
+            _render_location_section(result.get("video_metadata", {}))
             header_col, action_col = st.columns([4, 1])
             with header_col:
                 st.subheader(f"Survey Assessment: {summary.get('overall_health_category', 'Assessed')}")
