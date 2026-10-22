@@ -251,6 +251,28 @@ class CoralPipeline:
         else:
             raise ValueError(f"Unsupported model_type: {model_type}")
 
+    @property
+    def model_display_name(self) -> str:
+        if self.model_type == "dinov3":
+            return "DINOv3-DPT"
+        if self.model_type == "segformer":
+            return "SegFormer-B5"
+        model_yaml = getattr(getattr(self.model, "model", None), "yaml", {}) or {}
+        yaml_file = model_yaml.get("yaml_file")
+        if yaml_file:
+            model_name = Path(yaml_file).stem
+            if model_name.lower().startswith("yolo"):
+                return "YOLO" + model_name[4:]
+        norm = self.model_path.lower()
+        if "yolo26s_sem" in norm:
+            return "YOLO26s-sem"
+        if "yolo26n_sem" in norm:
+            return "YOLO26n-sem"
+        if "yolo26n_seg" in norm:
+            return "YOLO26n-seg"
+        p = Path(self.model_path)
+        return p.parent.parent.name if p.name == "best.pt" else p.stem
+
     def infer(self, image_or_path: str | Path | np.ndarray,
               save_overlay: str | Path | None = None,
               return_overlay: bool = False) -> dict:
@@ -357,11 +379,18 @@ class CoralPipeline:
                 if sel.any():
                     overlay[sel] = (0.55 * overlay[sel] + 0.45 * color).astype(np.uint8)
 
-            fs = max(0.45, min(1.2, width / 1200.0))
-            bt = max(1, int(round(width / 600)))
-            label_rects: list[tuple[int, int, int, int]] = [
-                (0, 0, max(420, int(width * 0.42)), int((int(22 * fs) + 8) * 6 + 16))
-            ]
+            small_banner = width < 640
+            fs = max(0.32, min(0.95, width / 1400.0))
+            bt = max(1, int(round(width / 750)))
+            row_h = int(22 * fs) + 6
+            bar_h = max(6, int(10 * fs))
+            if small_banner:
+                banner_h = min(height, int(row_h * 4 + bar_h + 16))
+            else:
+                banner_h = min(int(height * 0.32), int(row_h * 2.9 + bar_h + 16))
+            banner_y = height - banner_h
+
+            label_rects: list[tuple[int, int, int, int]] = [(0, banner_y, width, height)]
 
             def overlaps(a: tuple[int, int, int, int], b: tuple[int, int, int, int]) -> bool:
                 return not (a[2] <= b[0] or b[2] <= a[0] or a[3] <= b[1] or b[3] <= a[1])
@@ -394,44 +423,147 @@ class CoralPipeline:
                                 label_fs, (0, 0, 0), bt, cv2.LINE_AA)
                     break
 
-            # Informational HUD panel
-            status_text = decision["status"].upper()
-            status_color = (60, 180, 60) if decision["status"] == "accepted" else (40, 100, 220)
+            # Bottom overlay banner
+            banner_roi = overlay[banner_y:height, 0:width]
+            bg = np.zeros_like(banner_roi)
+            cv2.addWeighted(bg, 0.78, banner_roi, 0.22, 0, banner_roi)
 
+            # Subtle neutral top border line
+            cv2.line(overlay, (0, banner_y), (width, banner_y), (75, 75, 75), max(1, int(1.5 * fs)))
+
+            # Health verdict accent color
             tier_text, _, reasons_text = health["reef_health_category"].partition(" [")
-            hud_lines = [f"REEF HEALTH: {tier_text}"]
-            if reasons_text:
-                hud_lines.append(f"CONDITION: {reasons_text.rstrip(']')}")
-            hud_lines.append(
-                f"LCC: {health['live_coral_cover_pct']}% | Bleached: {health['bleached_coral_cover_pct']}% | Algae-covered: {health['algae_covered_cover_pct']}%"
-            )
-            status_row = len(hud_lines)
-            conf_text = f"{mean_conf:.2f}" if mean_conf is not None else "n/a"
-            hud_lines.append(f"TRUST STATUS: {status_text} | Coverage: {coverage*100:.1f}% | Conf: {conf_text}")
-            if decision["reasons"]:
-                hud_lines.append(f"FLAGS: {', '.join(decision['reasons'])}")
+            tier_lower = tier_text.lower()
+            if "excellent" in tier_lower or "good" in tier_lower:
+                health_accent = (60, 200, 80)      # Emerald green
+            elif "fair" in tier_lower:
+                health_accent = (40, 180, 240)     # Golden amber
+            elif "poor" in tier_lower or "degraded" in tier_lower:
+                health_accent = (50, 60, 230)      # Coral red
+            else:
+                health_accent = (160, 160, 160)    # Slate
 
-            panel_w = max(420, int(width * 0.42))
-            row_h = int(22 * fs) + 8
-            panel_h = len(hud_lines) * row_h + 16
-            panel = np.zeros((panel_h, panel_w, 3), dtype=np.uint8)
+            # Trust status accent color
+            trust_accent = (60, 200, 80) if decision["status"] == "accepted" else (50, 60, 230)
 
-            for i, line in enumerate(hud_lines):
-                c = status_color if i == status_row else (255, 255, 255)
-                scale = fs
-                while scale > 0.4:
-                    (tw, _), _ = cv2.getTextSize(line, cv2.FONT_HERSHEY_SIMPLEX, scale, bt)
-                    if tw <= panel_w - 24:
-                        break
-                    scale -= 0.05
-                cv2.putText(panel, line, (12, row_h * (i + 1) - 4), cv2.FONT_HERSHEY_SIMPLEX, scale, c, bt, cv2.LINE_AA)
+            margin = max(6 if small_banner else 12, int(width * 0.015))
+            bar_w = width - (2 * margin)
 
-            visible_h = min(panel_h, height)
-            visible_w = min(panel_w, width)
-            visible_panel = panel[:visible_h, :visible_w]
-            overlay[:visible_h, :visible_w] = (
-                0.50 * overlay[:visible_h, :visible_w] + 0.50 * visible_panel
-            ).astype(np.uint8)
+            # Row 1: Health Verdict & Telemetry
+            y1 = banner_y + int(row_h * 0.95)
+            cond_str = f" [{reasons_text.rstrip(']')}]" if reasons_text else ""
+            prefix = "REEF HEALTH: "
+            verdict = f"{tier_text}{cond_str}"
+            metrics = f"  |  LCC: {health['live_coral_cover_pct']}%  |  Bleached: {health['bleached_coral_cover_pct']}%  |  Algae: {health['algae_covered_cover_pct']}%"
+
+            conf_str = f"{mean_conf:.2f}" if mean_conf is not None else "n/a"
+            status_str = decision["status"].upper()
+            r_model = f"Model: {self.model_display_name}  |  "
+            r_trust = f"TRUST: {status_str}"
+            r_stats = f"  |  Cov: {coverage*100:.1f}%  |  Conf: {conf_str}"
+
+            if small_banner:
+                def draw_fitted_line(text: str, baseline: int, color: tuple[int, int, int], scale: float) -> None:
+                    while scale > 0.16:
+                        text_w = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, scale, 1)[0][0]
+                        if text_w <= bar_w:
+                            break
+                        scale -= 0.02
+                    cv2.putText(
+                        overlay, text, (margin, baseline), cv2.FONT_HERSHEY_SIMPLEX,
+                        max(scale, 0.16), color, 1, cv2.LINE_AA,
+                    )
+
+                small_scale = min(0.36, fs * 0.82)
+                draw_fitted_line(f"REEF HEALTH: {tier_text}", y1, health_accent, small_scale)
+                draw_fitted_line(
+                    f"LCC: {health['live_coral_cover_pct']}% | Bleached: {health['bleached_coral_cover_pct']}% | Algae: {health['algae_covered_cover_pct']}%",
+                    y1 + row_h, (235, 235, 235), small_scale,
+                )
+                draw_fitted_line(
+                    f"{self.model_display_name} | {status_str}",
+                    y1 + (2 * row_h), trust_accent, small_scale,
+                )
+                bar_y = y1 + (2 * row_h) + max(4, int(row_h * 0.45))
+            else:
+                scale1 = fs * 0.80
+
+                def measure_row1(scale: float) -> tuple[int, int, int, int, int, int]:
+                    widths = [
+                        cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, scale, bt)[0][0]
+                        for text in (prefix, verdict, metrics, r_model, r_trust, r_stats)
+                    ]
+                    return tuple(widths)
+
+                tw_p, tw_v, tw_m, tw_rm, tw_rt, tw_rs = measure_row1(scale1)
+                total_w1 = (tw_p + tw_v + tw_m) + (tw_rm + tw_rt + tw_rs) + margin * 3
+                while total_w1 > width and scale1 > 0.20:
+                    scale1 -= 0.04
+                    tw_p, tw_v, tw_m, tw_rm, tw_rt, tw_rs = measure_row1(scale1)
+                    total_w1 = (tw_p + tw_v + tw_m) + (tw_rm + tw_rt + tw_rs) + margin * 3
+
+                cur_x = margin
+                cv2.putText(overlay, prefix, (cur_x, y1), cv2.FONT_HERSHEY_SIMPLEX, scale1, (200, 200, 200), bt, cv2.LINE_AA)
+                cur_x += tw_p
+                cv2.putText(overlay, verdict, (cur_x, y1), cv2.FONT_HERSHEY_SIMPLEX, scale1, health_accent, bt, cv2.LINE_AA)
+                cur_x += tw_v
+                cv2.putText(overlay, metrics, (cur_x, y1), cv2.FONT_HERSHEY_SIMPLEX, scale1, (240, 240, 240), bt, cv2.LINE_AA)
+
+                rx = width - margin - (tw_rm + tw_rt + tw_rs)
+                cv2.putText(overlay, r_model, (rx, y1), cv2.FONT_HERSHEY_SIMPLEX, scale1, (200, 200, 200), bt, cv2.LINE_AA)
+                rx += tw_rm
+                cv2.putText(overlay, r_trust, (rx, y1), cv2.FONT_HERSHEY_SIMPLEX, scale1, trust_accent, bt, cv2.LINE_AA)
+                rx += tw_rt
+                cv2.putText(overlay, r_stats, (rx, y1), cv2.FONT_HERSHEY_SIMPLEX, scale1, (200, 200, 200), bt, cv2.LINE_AA)
+                bar_y = y1 + max(8, int(row_h * 0.82))
+
+            # Row 2: Stacked Benthic Composition Progress Bar
+            curr_x = margin
+            for i, name in enumerate(self.class_names):
+                count = counts.get(name, 0)
+                frac = count / total_valid if total_valid > 0 else 0.0
+                w_seg = int(round(frac * bar_w))
+                if w_seg > 0:
+                    x_end = min(curr_x + w_seg, margin + bar_w)
+                    col = tuple(int(c) for c in self.colors[i])
+                    cv2.rectangle(overlay, (curr_x, bar_y), (x_end, bar_y + bar_h), col, -1)
+                    cv2.rectangle(overlay, (curr_x, bar_y), (x_end, bar_y + bar_h), (25, 25, 25), 1)
+                    curr_x = x_end
+
+            # Row 3: Color Guide Legend & Substrate Percentages
+            legend_labels = {
+                "coral_alive": f"Alive {proportions.get('coral_alive', 0.0) * 100:.1f}%",
+                "coral_bleached": f"Bleached {proportions.get('coral_bleached', 0.0) * 100:.1f}%",
+                "coral_dead": f"Dead {proportions.get('coral_dead', 0.0) * 100:.1f}%",
+                "algae": f"Algae {proportions.get('algae', 0.0) * 100:.1f}%",
+                "hard_substrate": f"Substrate {proportions.get('hard_substrate', 0.0) * 100:.1f}%",
+                "sand": f"Sand {proportions.get('sand', 0.0) * 100:.1f}%",
+                "non_reef": f"Non-Reef {proportions.get('non_reef', 0.0) * 100:.1f}%",
+            }
+
+            y3 = bar_y + bar_h + int(row_h * (0.8 if small_banner else 0.85))
+            legend_scale = min(0.28, fs * 0.65) if small_banner else max(0.35, fs * 0.65)
+            (_, text_h), _ = cv2.getTextSize("Alive", cv2.FONT_HERSHEY_SIMPLEX, legend_scale, 1)
+
+            # Larger swatches vertically centered with the text letters
+            swatch_sz = max(6, int(text_h * 1.15)) if small_banner else max(11, int(text_h * 1.15))
+            y_mid = y3 - text_h // 2
+            box_top = y_mid - swatch_sz // 2
+            box_bot = box_top + swatch_sz
+
+            step = bar_w // len(self.class_names)
+            for idx, name in enumerate(self.class_names):
+                lx = margin + idx * step
+                col = tuple(int(c) for c in self.colors[idx])
+                small_legend_labels = {
+                    "coral_alive": "ALV", "coral_bleached": "BLE", "coral_dead": "DED",
+                    "algae": "ALG", "hard_substrate": "SUB", "sand": "SND", "non_reef": "NR",
+                }
+                lbl = small_legend_labels.get(name, name) if small_banner else legend_labels.get(name, name)
+                cv2.rectangle(overlay, (lx, box_top), (lx + swatch_sz, box_bot), col, -1)
+                cv2.rectangle(overlay, (lx, box_top), (lx + swatch_sz, box_bot), (190, 190, 190), 1)
+                cv2.putText(overlay, lbl, (lx + swatch_sz + 6, y3), cv2.FONT_HERSHEY_SIMPLEX, legend_scale, (220, 220, 220), 1, cv2.LINE_AA)
+
             if save_overlay:
                 cv2.imwrite(str(save_overlay), overlay)
 

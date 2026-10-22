@@ -14,6 +14,7 @@ if str(REPO_ROOT) not in sys.path:
 import streamlit as st
 import pandas as pd
 import cv2
+from ultralytics import YOLO
 from src.inference.pipeline import CoralPipeline
 from src.inference.dinov3_dpt import is_dinov3_dpt
 
@@ -29,7 +30,7 @@ st.caption("Automated benthic segmentation, quantitative reef health indicators,
 # Sidebar Configuration
 st.sidebar.header("Configuration")
 model_choices: dict[str, str] = {}
-for checkpoint in sorted((REPO_ROOT / "models/checkpoints").glob("**/best.pt")):
+for checkpoint in sorted((REPO_ROOT / "models/checkpoints").glob("**/*.pt")):
     rel_path = checkpoint.relative_to(REPO_ROOT).as_posix()
     model_choices[rel_path] = str(checkpoint)
 
@@ -57,20 +58,56 @@ if Path(model_path).is_dir():
 else:
     model_type = "yolo"
 
+
+@st.cache_data(show_spinner=False)
+def inspect_yolo_checkpoint(checkpoint_path: str, checkpoint_mtime_ns: int) -> dict:
+    """Read architecture and training properties saved in an Ultralytics checkpoint."""
+    model = YOLO(checkpoint_path)
+    checkpoint = getattr(model, "ckpt", None) or {}
+    train_args = checkpoint.get("train_args", {}) or {}
+    model_yaml = getattr(getattr(model, "model", None), "yaml", {}) or {}
+    yaml_file = model_yaml.get("yaml_file")
+    model_name = Path(yaml_file).stem if yaml_file else Path(checkpoint_path).parent.parent.name
+    names = model.names
+    class_names = [names[i] for i in range(len(names))] if isinstance(names, dict) else list(names)
+    try:
+        imgsz = int(train_args.get("imgsz", 1024))
+    except (TypeError, ValueError):
+        imgsz = 1024
+    return {
+        "name": model_name,
+        "task": str(getattr(model, "task", train_args.get("task", "unknown"))),
+        "imgsz": imgsz,
+        "classes": class_names,
+    }
+
+
+if model_type == "yolo":
+    try:
+        yolo_properties = inspect_yolo_checkpoint(model_path, Path(model_path).stat().st_mtime_ns)
+    except Exception as exc:
+        st.sidebar.error(f"Could not read YOLO checkpoint metadata: {exc}")
+        st.stop()
+
 if model_type == "dinov3":
     st.sidebar.caption("High-precision foundation model (DINOv3 ViT-L + DPT).")
 elif model_type == "segformer":
     st.sidebar.caption("Transformer benchmark (SegFormer-B5).")
 else:
-    if "yolo26n_sem" in model_path:
-        st.sidebar.caption("Real-time edge semantic model (~38 FPS, 0.026 s/image).")
-    else:
-        st.sidebar.caption("Fast instance segmentation model.")
+    task_label = "semantic segmentation" if yolo_properties["task"] == "semantic" else f"{yolo_properties['task']} model"
+    st.sidebar.caption(f"{yolo_properties['name']} · {task_label}")
+    st.sidebar.caption(
+        f"Saved training size: {yolo_properties['imgsz']}px · "
+        f"{len(yolo_properties['classes'])} classes: {', '.join(yolo_properties['classes'])}"
+    )
 
 if model_type == "yolo":
     conf_thresh = st.sidebar.slider("Confidence Threshold", 0.05, 0.80, 0.20, 0.05)
-    default_imgsz = 1024 if "yolo26n_sem" in model_path else 512
-    img_size = st.sidebar.select_slider("Image Resolution (px)", options=[384, 512, 640, 768, 1024], value=default_imgsz)
+    img_size = st.sidebar.select_slider(
+        "Image Resolution (px)",
+        options=sorted({384, 512, 640, 768, 1024, yolo_properties["imgsz"]}),
+        value=yolo_properties["imgsz"],
+    )
 else:
     conf_thresh = 0.20
     img_size = 1024

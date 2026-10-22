@@ -1,8 +1,8 @@
-"""Compare the project YOLO checkpoints and released CoralscapesV2 dense models.
+"""Compare project YOLO checkpoints and released CoralscapesV2 dense models.
 
-Scores four backends on the same official test split and the same project
-taxonomy: YOLO26n-sem, YOLO26n-seg, the released SegFormer-B5 (95-class) and the
-released DINOv3 ViT-L + LoRA + DPT (95-class).
+Scores five backends on the same official test split and the same project
+taxonomy: YOLO26n-sem, YOLO26s-sem, YOLO26n-seg, the released SegFormer-B5
+(95-class) and the released DINOv3 ViT-L + LoRA + DPT (95-class).
 
 Run with the evaluation environment and a prepared CoralscapesV2 official test
 split under data/coralscapesv2-test/{images,masks}.
@@ -42,11 +42,12 @@ from src.inference.dinov3_dpt import (  # noqa: E402
 
 TEST_ROOT = ROOT / "data/eval/coralscapesv2-test"
 YOLO_PATH = ROOT / "models/checkpoints/yolo26n_sem/weights/best.pt"
+YOLO_S_PATH = ROOT / "models/checkpoints/yolo26s_sem/weights/best.pt"
 YOLO_SEG_PATH = ROOT / "models/checkpoints/yolo26n_seg/weights/best.pt"
 SEGFORMER_PATH = ROOT / "models/pretrained/segformer-b5-coralscapesv2-95"
 DINOV3_PATH = ROOT / "models/pretrained/coralscapesv2-dinov3-vitl-lora-dpt-95_class"
 DATA_LABELS = TEST_ROOT / "id2label.json"
-OUT = ROOT / "reports/model_comparison.json"
+OUT = ROOT / "models/model_comparison.json"
 IMGSZ = 1024
 N_CLASSES = len(CLASSES)
 IGNORE = 255
@@ -54,10 +55,11 @@ PRED_IGNORE = N_CLASSES
 # Cache directories are keyed by taxonomy size so a class-count change can
 # never silently reuse predictions computed under a different taxonomy.
 YOLO_CACHE = TEST_ROOT / f"predictions/yolo26n_sem_{N_CLASSES}cls"
+YOLO_S_CACHE = TEST_ROOT / f"predictions/yolo26s_sem_{N_CLASSES}cls"
 YOLO_SEG_CACHE = TEST_ROOT / f"predictions/yolo26n_seg_{N_CLASSES}cls"
 SEGFORMER_CACHE = TEST_ROOT / f"predictions/segformer_b5_{N_CLASSES}cls"
 DINOV3_CACHE = TEST_ROOT / f"predictions/dinov3_vitl_dpt_{N_CLASSES}cls"
-MODEL_ORDER = ("yolo", "yolo_seg", "segformer", "dinov3")
+MODEL_ORDER = ("yolo", "yolo_s", "yolo_seg", "segformer", "dinov3")
 SEG_CONF = 0.25
 
 
@@ -129,23 +131,29 @@ def check_project_ids(ids: list[int], model_name: str) -> None:
         raise RuntimeError(f"{model_name} label fold cannot reach project classes: {names}")
 
 
-def run_yolo(pairs: list[tuple[Path, Path]], raw_to_project: dict) -> dict:
-    YOLO_CACHE.mkdir(parents=True, exist_ok=True)
+def run_yolo(
+    pairs: list[tuple[Path, Path]],
+    raw_to_project: dict,
+    checkpoint: Path = YOLO_PATH,
+    cache: Path = YOLO_CACHE,
+    model_name: str = "Ultralytics YOLO26n-sem",
+) -> dict:
+    cache.mkdir(parents=True, exist_ok=True)
     model = None
     cm = np.zeros((N_CLASSES, N_CLASSES + 1), dtype=np.int64)
     inference_seconds = 0.0
     inference_images = 0
     for index, (image_path, mask_path) in enumerate(pairs, start=1):
-        cache_path = YOLO_CACHE / f"{image_path.stem}.png"
+        cache_path = cache / f"{image_path.stem}.png"
         if cache_path.is_file():
             pred = np.asarray(Image.open(cache_path), dtype=np.uint8)
         else:
             if model is None:
-                model = YOLO(str(YOLO_PATH))
+                model = YOLO(str(checkpoint))
                 # Refuse to score a checkpoint trained on a different taxonomy.
                 if len(model.names) != N_CLASSES:
                     raise RuntimeError(
-                        f"{YOLO_PATH} has {len(model.names)} classes but the project taxonomy has "
+                        f"{checkpoint} has {len(model.names)} classes but the project taxonomy has "
                         f"{N_CLASSES}; retrain the checkpoint before comparing."
                     )
             infer_start = time.perf_counter()
@@ -168,8 +176,8 @@ def run_yolo(pairs: list[tuple[Path, Path]], raw_to_project: dict) -> dict:
         if index % 50 == 0:
             print(f"YOLO processed {index}/{len(pairs)} test images", flush=True)
     return {
-        "model": "Ultralytics YOLO26n-sem",
-        "checkpoint": str(YOLO_PATH.relative_to(ROOT)),
+        "model": model_name,
+        "checkpoint": str(checkpoint.relative_to(ROOT)),
         "images": len(pairs),
         "protocol": f"One aspect-preserving Ultralytics inference pass per 2048x1024 image, imgsz=1024 (long side 1024), FP32. Dense {N_CLASSES}-class semantic argmax; no confidence threshold.",
         "inference_images_measured": inference_images,
@@ -400,6 +408,8 @@ def main() -> None:
 
     if "yolo" in wanted and not YOLO_PATH.is_file():
         raise FileNotFoundError(f"YOLO checkpoint is missing: {YOLO_PATH}")
+    if "yolo_s" in wanted and not YOLO_S_PATH.is_file():
+        raise FileNotFoundError(f"YOLO26s-sem checkpoint is missing: {YOLO_S_PATH}")
     if "yolo_seg" in wanted and not YOLO_SEG_PATH.is_file():
         raise FileNotFoundError(f"YOLO-seg checkpoint is missing: {YOLO_SEG_PATH}")
     if "segformer" in wanted and not (SEGFORMER_PATH / "model.safetensors").is_file():
@@ -414,6 +424,9 @@ def main() -> None:
     raw_to_project = make_raw_to_project(labels)
     runners = {
         "yolo": lambda: run_yolo(pairs, raw_to_project),
+        "yolo_s": lambda: run_yolo(
+            pairs, raw_to_project, YOLO_S_PATH, YOLO_S_CACHE, "Ultralytics YOLO26s-sem"
+        ),
         "yolo_seg": lambda: run_yolo_seg(pairs, raw_to_project),
         "segformer": lambda: run_segformer(pairs, raw_to_project),
         "dinov3": lambda: run_dinov3(pairs, raw_to_project, device_name=args.device),

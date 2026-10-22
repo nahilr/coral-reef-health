@@ -84,8 +84,14 @@ def main() -> None:
         print(json.dumps(report, indent=2))
     elif args.cmd == "app":
         cmd = [sys.executable, "-m", "streamlit", "run", "src/app/streamlit_app.py", "--server.port", str(args.port)]
-        subprocess.run(cmd, check=True)
+        try:
+            subprocess.run(cmd, check=True)
+        except KeyboardInterrupt:
+            pass
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        sys.exit(0)

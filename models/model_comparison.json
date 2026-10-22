@@ -19,6 +19,110 @@
   "metric_definition": "Pixel accuracy and macro IoU over valid GT pixels; predictions falling in void/ignored categories count as incorrect. Macro IoU averages classes with nonzero union.",
   "models": [
     {
+      "model": "Ultralytics YOLO26s-sem",
+      "checkpoint": "models/checkpoints/yolo26s_sem/weights/best.pt",
+      "images": 473,
+      "protocol": "One aspect-preserving Ultralytics inference pass per 2048x1024 image, imgsz=1024, batch=1, FP32. Dense 7-class semantic argmax; no confidence threshold.",
+      "inference_images_measured": 473,
+      "inference_seconds_measured": 18.13399961810501,
+      "seconds_per_image": 0.03833826557738902,
+      "device": "NVIDIA GeForce GTX 1650",
+      "pixel_accuracy": 0.7997470728001078,
+      "mean_iou": 0.5797662253670552,
+      "classes_in_miou": 7,
+      "per_class_iou": {
+        "coral_alive": 0.6514370545143389,
+        "coral_bleached": 0.5695319457339372,
+        "coral_dead": 0.21414486638508454,
+        "algae": 0.5096636618293096,
+        "hard_substrate": 0.6132598829763435,
+        "sand": 0.7009613049736544,
+        "non_reef": 0.799364861156719
+      },
+      "health_output_metrics": {
+        "live_cover_mae_percentage_points": 5.229006342494715,
+        "live_cover_bias_percentage_points": 3.308964059196617,
+        "condition_capped_tier_agreement_pct": 70.04310344827586,
+        "condition_capped_within_one_tier_pct": 96.76724137931035,
+        "cover_only_tier_agreement_pct": 78.66379310344827,
+        "cover_only_within_one_tier_pct": 96.55172413793103,
+        "reef_positive_images": 464,
+        "total_images": 473
+      },
+      "confusion_matrix": [
+        [
+          92585820,
+          286052,
+          1989627,
+          2131002,
+          6302277,
+          49514,
+          6287308,
+          0
+        ],
+        [
+          1035624,
+          8175826,
+          317522,
+          88408,
+          290181,
+          4618,
+          139148,
+          0
+        ],
+        [
+          7478796,
+          392980,
+          8361102,
+          1834843,
+          9790990,
+          15711,
+          1424282,
+          0
+        ],
+        [
+          7160333,
+          1285746,
+          1999720,
+          57764781,
+          15744642,
+          197904,
+          6967725,
+          0
+        ],
+        [
+          7221055,
+          365193,
+          4473854,
+          13124154,
+          149386312,
+          4687002,
+          16347499,
+          0
+        ],
+        [
+          1566858,
+          1459160,
+          132311,
+          100860,
+          4084894,
+          66266283,
+          13228423,
+          0
+        ],
+        [
+          8031242,
+          514886,
+          832404,
+          4938910,
+          11775776,
+          2742745,
+          291762286,
+          0
+        ]
+      ]
+    },
+    {
       "model": "Ultralytics YOLO26n-sem",
       "checkpoint": "models/checkpoints/yolo26n_sem/weights/best.pt",
       "images": 473,

@@ -5,19 +5,24 @@ import argparse
 import csv
 import io
 import json
+import sys
 from pathlib import Path
 
-import cv2
-import numpy as np
-from PIL import Image
-import pyarrow.parquet as pq
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
-from .label_map import (
+from src.data.label_map import (
     CLASSES,
     load_raw_labels,
     make_raw_to_project,
     project_mask,
 )
+
+import cv2
+import numpy as np
+from PIL import Image
+import pyarrow.parquet as pq
 
 
 def contours_to_yolo(mask: np.ndarray, class_id: int, output_size=None, min_area=20):

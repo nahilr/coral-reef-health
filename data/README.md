@@ -6,7 +6,7 @@ All dataset, processed, and evaluation files are git-ignored; this README is tra
 |---|---|---|
 | `raw/` | Original dataset downloads and demo media | Keep source data unchanged; record revision and licence. |
 | `processed/` | 7-class YOLO data generated from CoralscapesV2 | Rebuildable with `main.py prepare`. |
-| `eval/coralscapesv2-test/` | Fixed 473-image benchmark fixture used by the four-backend evaluator | Treat as frozen during comparisons. |
+| `eval/coralscapesv2-test/` | Fixed 473-image benchmark fixture used by the five-backend evaluator | Treat as frozen during comparisons. |
 | `eval/predictions/` | Cached prediction maps keyed by model and taxonomy | Disposable; safe to remove and regenerate. |
 
 ## Current data
@@ -34,7 +34,7 @@ python main.py evaluate \
   --out reports/eval_metrics.json
 ```
 
-The reproducible four-backend benchmark uses the frozen fixture under `eval/coralscapesv2-test/` and is run with `scripts/evaluate_model_comparison.py`.
+The reproducible five-backend benchmark uses the frozen fixture under `eval/coralscapesv2-test/` and is run with `scripts/evaluate_model_comparison.py`.
 
 ## Retention
 
