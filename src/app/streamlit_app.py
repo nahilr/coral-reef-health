@@ -120,7 +120,7 @@ st.sidebar.markdown(r"""
 - **Excellent**: Live Coral Cover $\ge 50\%$
 - **Good**: Live Coral Cover $25\% - 50\%$
 - **Fair**: Live Coral Cover $10\% - 25\%$
-- **Poor / Degraded**: Live Coral Cover $< 10\%$
+- **Poor**: Live Coral Cover $< 10\%$
 """)
 
 
@@ -222,11 +222,10 @@ if mode == "Single Image":
                                   delta_color="normal",
                                   help="Area annotated as algae-covered in the segmentation labels.")
                     with col4:
-                        st.metric("Reef Health Status", health["reef_health_category"].split(" [")[0],
-                                  help=health["reef_health_category"])
+                        st.metric("Coral Condition", health.get("coral_condition") or "Not assessable",
+                                  help="Based on bleaching and mortality among detected coral only.")
                         st.caption(
-                            f"{health.get('coral_condition', 'Stable')} · "
-                            f"cover tier {health.get('live_cover_tier', 'n/a')}"
+                            f"Live coral cover tier: {health.get('live_cover_tier', 'n/a')}"
                         )
 
                     st.markdown("---")
@@ -349,7 +348,7 @@ else:
                             lcc = h.get("live_coral_cover_pct", 0.0)
                             bleaching_ratio = h.get("bleaching_ratio_pct", 0.0)
                             algae = h.get("algae_covered_cover_pct", h.get("macroalgae_cover_pct", 0.0))
-                            cat = h.get("reef_health_category", "Assessing...")
+                            cat = h.get("coral_condition") or "Not assessable"
                             status = rel.get("status", "pending").upper()
 
                             with telemetry_box.container():
@@ -357,7 +356,7 @@ else:
                                 m1.metric("Live Coral Cover", f"{lcc:.1f}%")
                                 m2.metric("Bleaching Ratio", f"{bleaching_ratio:.1f}%")
                                 m3.metric("Macroalgae", f"{algae:.1f}%")
-                                m4.metric("Frame Health / Trust", f"{cat}", delta=f"Trust: {status}",
+                                m4.metric("Frame Coral Condition", f"{cat}", delta=f"Trust: {status}",
                                           delta_color="normal" if status == "ACCEPTED" else "inverse")
 
                     result = pipeline.infer_video(
@@ -409,7 +408,7 @@ else:
             _render_location_section(result.get("video_metadata", {}))
             header_col, action_col = st.columns([4, 1])
             with header_col:
-                st.subheader(f"Survey Assessment: {summary.get('overall_health_category', 'Assessed')}")
+                st.subheader(f"Survey Coral Condition: {summary.get('overall_coral_condition') or 'Not assessable'}")
             with action_col:
                 if st.button("🔄 Re-process"):
                     st.session_state.pop("_video_survey_cache", None)

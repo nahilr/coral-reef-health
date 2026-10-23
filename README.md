@@ -1,6 +1,6 @@
 # Trustworthy AI-Assisted Coral Reef Health Assessment
 
-This project uses computer vision to measure seafloor cover and visible coral condition in underwater images and sampled ROV video. It checks image quality and model confidence, then reports a reef-health estimate and a review status.
+This project uses computer vision to estimate visible benthic cover and coral condition in underwater images and sampled ROV video. It checks image quality and model confidence, then reports a reef-health estimate and a review status.
 
 The project uses one **7-class taxonomy** and five model backends: YOLO26n-sem, YOLO26s-sem, YOLO26n-seg, SegFormer-B5, and DINOv3-DPT. Run them with the `main.py` command-line tool or the Streamlit app. The pipeline can also process sampled video frames.
 
@@ -139,7 +139,7 @@ python main.py infer --model models/pretrained/coralscapesv2-dinov3-vitl-lora-dp
 ```
 **Outputs generated in `outputs/inference/`**:
 - `overlay.jpg`: The original image with color-coded benthic masks, detection boxes, and the bottom overlay banner.
-- `report.json`: Machine-readable JSON containing quality flags, mean confidence, benthic area percentages, and health verdicts.
+- `report.json`: Machine-readable JSON containing quality flags, mean confidence, benthic area percentages, coral condition, cover tier, and a combined category.
 
 #### B. Video Survey Inference
 Process underwater ROV survey footage with frame subsampling and survey-level aggregation:
@@ -149,10 +149,13 @@ python main.py infer --video underwater_transect.mp4 --every-n 2 --out outputs/v
 ```
 **Outputs generated in `outputs/video_run/`**:
 - `annotated_survey.mp4`: Compressed H.264 video with real-time bottom banner telemetry rendered on every processed frame.
-- `report.json`: Survey-wide aggregated metrics (mean LCC, mean bleaching ratio, acceptance rate, and overall health tier), with per-frame details.
+- `report.json`: Survey-wide aggregated metrics (mean LCC, mean bleaching ratio, acceptance rate, and coral condition), with per-frame details. It also retains the combined `overall_health_category` field.
 
 #### C. Batch inference from a folder
 Use `--dir` to recursively process supported images and videos in one folder. The model is loaded once for the batch. Annotated media, per-file JSON reports, and the batch manifest are written into the folder passed to `--out`, preserving any nested input subfolders.
+
+#### Curated test-set examples
+Selected examples spanning cover, bleaching, mortality, algae, sand-only, and review cases are collected in `data/processed/showcase_candidates/`. Its `README.md` explains the selection and cached-report status; `index.csv` summarizes metrics and reliability outcomes.
 
 ```bash
 python main.py infer \
@@ -389,7 +392,13 @@ $$\text{Reef Substrate Area} = \text{Total Valid Pixels} - \text{Pixels}(\text{n
 
 ---
 
-### Health Verdict Architecture: `REEF HEALTH: <Category> [<Condition>]`
+### Coral Condition and Live Cover
+
+The image, video, and survey displays show **Coral Condition** separately from Live Coral Cover (LCC). Coral condition is based on the bleaching and dead-coral ratios among detected coral. If no coral is detected, it is reported as **Not assessable (No coral detected)**. A sand-only image can therefore have 0% LCC and a **Poor** cover tier while coral condition remains not assessable.
+
+The cover tiers are **Excellent**, **Good**, **Fair**, and **Poor**; **Poor** means LCC below 10%. The app displays the condition and LCC separately. The JSON `reef_health_category` field remains a combined summary for compatibility; it applies the cover tier, bleaching/mortality caps, and an algae warning. Use `coral_condition` for coral condition and `live_cover_tier` for the cover band.
+
+### Combined Reef Assessment in JSON
 
 The verdict combines two independent ecological axes:
 $$\text{Verdict} = \mathbf{Category} \quad [\mathbf{Condition}]$$
@@ -399,7 +408,7 @@ The base category follows the international Reef Check / Gomez et al. standard:
 - **`Excellent`**: Live Coral Cover ≥ 50.0%
 - **`Good`**: Live Coral Cover 25.0% – 49.9%
 - **`Fair`**: Live Coral Cover 10.0% – 24.9%
-- **`Poor / Degraded`**: Live Coral Cover < 10.0%
+- **`Poor`**: Live Coral Cover < 10.0%
 - **`Indeterminate`**: No reef substrate detected in frame (0% benthic area).
 
 #### Condition Disturbance Divisioning & Capping Guardrail
@@ -409,18 +418,18 @@ When thermal stress or mortality is detected, disturbance flags are raised and *
 |---|:---:|---|:---:|
 | **Bleaching** | 10% – 25% | `Moderate Bleaching Warning` | **Good** |
 | | 25% – 50% | `Severe Bleaching Alert` | **Fair** |
-| | ≥ 50% | `Extensive Bleaching` | **Poor / Degraded** |
+| | ≥ 50% | `Extensive Bleaching` | **Poor** |
 | **Mortality** | 10% – 25% | `Elevated Mortality` | **Good** |
 | | 25% – 50% | `High Mortality` | **Fair** |
-| | ≥ 50% | `Extensive Mortality` | **Poor / Degraded** |
+| | ≥ 50% | `Extensive Mortality` | **Poor** |
 | **Algae Overgrowth** | Algae > 30% and Algae > LCC | `Algae-Covered Area Warning` | Preserves tier, flags phase shift |
 
-#### Real-World Verdict Combination Examples
-- `REEF HEALTH: Excellent`: LCC ≥ 50%, bleaching < 10%, mortality < 10%.
-- `REEF HEALTH: Good [Stable]`: LCC = 38%, bleaching < 10%, mortality < 10%.
-- `REEF HEALTH: Fair [Severe Bleaching Alert]`: LCC would be Good (32%), but capped to Fair because 30% of all coral is bleached.
-- `REEF HEALTH: Poor / Degraded [Extensive Mortality]`: Capped to degraded because > 50% of colonies are dead.
-- `REEF HEALTH: Fair [Moderate Bleaching Warning; Algae-Covered Area Warning]`: Concurrently experiencing thermal stress and macroalgal dominance.
+#### Examples
+- `reef_health_category: Excellent`: LCC ≥ 50%, with low bleaching and dead-coral ratios.
+- `reef_health_category: Good`: LCC = 38%, with low bleaching and dead-coral ratios.
+- `reef_health_category: Fair [Severe Bleaching Alert]`: the cover tier is capped because the bleaching ratio reaches the severe threshold.
+- `reef_health_category: Poor [Extensive Mortality]`: the cover tier is capped because the dead-coral ratio reaches the extensive threshold.
+- A sand-only image can have `live_cover_tier: Poor` and `coral_condition: Not assessable (No coral detected)`.
 
 ---
 
@@ -432,14 +441,14 @@ The default overlay renders a banner along the bottom ~8–10% of the frame, lea
 
 ```text
 +================================================================================================================+ <- 2px Accent Border
-| REEF HEALTH: GOOD [Stable]  |  LCC: 38.5% · Bleached: 2.1% · Algae: 12.0%   [ Model: YOLO26n-sem | ACCEPTED ]  | <- Row 1: Telemetry
+| CORAL CONDITION: Stable  |  LCC: 38.5% · Bleached: 2.1% · Algae: 12.0%   [ Model: YOLO26n-sem | ACCEPTED ]  | <- Row 1: Telemetry
 | [🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟨🟫🟫🟩🟩🟩🟩⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜🟨🟨🟨🟨🟨🟨🟨🟨]                        | <- Row 2: Stacked Bar
 | ■ Alive 32.7%   ■ Bleached 1.8%   ■ Dead 3.6%   ■ Algae 10.2%   ■ Substrate 20.4%   ■ Sand 16.3%   ■ Non-Reef 15.0% | <- Row 3: Color Guide
 +----------------------------------------------------------------------------------------------------------------+
 ```
 
-1. **Top Accent Line**: 2px border color-coded to health category (🟢 *Good/Excellent*, 🟡 *Fair*, 🔴 *Poor/Degraded*).
-2. **Row 1 (Telemetry)**: Displays Reef Health Verdict, LCC, Bleached %, Algae %, active Model name, Trust status, Coverage %, and Confidence.
+1. **Top Accent Line**: 2px border color-coded to coral condition (stable, warning, alert, or not assessable).
+2. **Row 1 (Telemetry)**: Displays Coral Condition, LCC, bleached cover, algae cover, active Model name, Trust status, Coverage %, and Confidence.
 3. **Row 2 (Stacked Composition Bar)**: Horizontal progress bar proportioned to exact pixel area fractions in the 7 class colors.
 4. **Row 3 (Color Guide Legend)**: Swatches show each class's share of classified image pixels. Row 1 health values use their ecological denominators.
 
@@ -451,7 +460,7 @@ $$\text{Overlay}[x, y] = 0.55 \times \text{Image}[x, y] + 0.45 \times \text{Clas
 For dense models, display bounding boxes are synthesized around connected coral components (`BOX_CLASSES = ('coral_alive', 'coral_bleached', 'coral_dead')`). A collision avoidance algorithm tests slots (above, inside-top, inside-bottom) and reserves the bottom banner region to prevent text overlap.
 
 ### Video Streaming & Survey-Level Aggregation
-In `infer_video`, frames are sampled via `--every-n`, overlay HUDs are rendered, and streams are encoded using `ffmpeg` (`-c:v libx264 -preset fast -crf 22 -pix_fmt yuv420p`). The final survey report aggregates rolling mean composition, frame acceptance rate, and an overall survey health verdict.
+In `infer_video`, frames are sampled via `--every-n`, overlay HUDs are rendered, and streams are encoded using `ffmpeg` (`-c:v libx264 -preset fast -crf 22 -pix_fmt yuv420p`). The app shows the aggregated coral condition and cover metrics. The JSON summary also retains `overall_health_category`, the combined cover-and-condition field.
 
 ---
 

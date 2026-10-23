@@ -42,14 +42,14 @@ def test_extensive_bleaching_caps_excellent_cover() -> None:
     # 37.5% live cover (Good) and 50% of all coral bleached.
     result = health(coral_alive=600, coral_bleached=600, sand=400)
     assert result["live_cover_tier"] == "Good"
-    assert result["reef_health_category"] == "Poor / Degraded [Extensive Bleaching]"
-    assert result["condition_cap"] == "Poor / Degraded"
+    assert result["reef_health_category"] == "Poor [Extensive Bleaching]"
+    assert result["condition_cap"] == "Poor"
 
 
 def test_extensive_mortality_caps_excellent_cover() -> None:
     result = health(coral_alive=500, coral_dead=500)
     assert result["live_cover_tier"] == "Excellent"
-    assert tier(result) == "Poor / Degraded"
+    assert tier(result) == "Poor"
     assert result["coral_condition"] == "Extensive Mortality"
 
 
@@ -65,8 +65,8 @@ def test_bleaching_thresholds() -> None:
 def test_condition_never_raises_the_tier() -> None:
     # Poor cover stays poor even with a healthy assemblage.
     poor = health(coral_alive=50, sand=950)
-    assert poor["live_cover_tier"] == "Poor / Degraded"
-    assert tier(poor) == "Poor / Degraded"
+    assert poor["live_cover_tier"] == "Poor"
+    assert tier(poor) == "Poor"
     assert poor["condition_cap"] is None
 
 
@@ -93,7 +93,7 @@ def test_coral_dead_mortality_ratio() -> None:
     result = health(coral_alive=400, coral_dead=400, sand=200)
     assert result["live_cover_tier"] == "Good"
     assert result["coral_condition"] == "Extensive Mortality"
-    assert tier(result) == "Poor / Degraded"
+    assert tier(result) == "Poor"
 
 
 def test_condition_only_lowers_tier_over_grid() -> None:

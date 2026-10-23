@@ -47,13 +47,13 @@ CLASS_COLORS = np.array([
 _HEALTH_EXCLUDED = set(EXCLUDED_FROM_HEALTH)
 
 # Live-cover tiers, best to worst (Reef Check / Gomez et al. benchmark).
-_TIER_ORDER = ("Excellent", "Good", "Fair", "Poor / Degraded")
+_TIER_ORDER = ("Excellent", "Good", "Fair", "Poor")
 
 # Coral-condition disturbances cap the cover tier: a bleached or dead
 # assemblage must not be reported as healthier than its condition allows.
 # Level 1 (>=10% of coral affected) caps at Good, level 2 (>=25%) at Fair and
-# level 3 (>=50%) at Poor / Degraded.
-_CONDITION_CAPS = {0: None, 1: "Good", 2: "Fair", 3: "Poor / Degraded"}
+# level 3 (>=50%) at Poor.
+_CONDITION_CAPS = {0: None, 1: "Good", 2: "Fair", 3: "Poor"}
 
 
 def _confidence_semantic_predictor_class(temperature: float = 1.0, retain_logits: bool = False):
@@ -129,7 +129,8 @@ def _condition_severity(value: float, moderate: str, severe: str, extensive: str
 
 
 def _reef_health_verdict(lcc: float, bleaching_ratio: float, mortality_ratio: float,
-                         algae_cover: float, has_reef: bool) -> tuple[str, str, str | None, str | None]:
+                         algae_cover: float, has_reef: bool,
+                         has_coral: bool = True) -> tuple[str, str, str | None, str | None]:
     """Combine the live-cover tier with coral condition.
 
     Returns ``(category, cover_tier, condition, condition_cap)``; ``condition`` is
@@ -146,7 +147,7 @@ def _reef_health_verdict(lcc: float, bleaching_ratio: float, mortality_ratio: fl
     elif lcc >= 10.0:
         cover_tier = "Fair"
     else:
-        cover_tier = "Poor / Degraded"
+        cover_tier = "Poor"
 
     bleach_level, bleach_label = _condition_severity(
         bleaching_ratio, "Moderate Bleaching Warning", "Severe Bleaching Alert", "Extensive Bleaching"
@@ -158,7 +159,10 @@ def _reef_health_verdict(lcc: float, bleaching_ratio: float, mortality_ratio: fl
     category = cover_tier if condition_cap is None else _worse_tier(cover_tier, condition_cap)
 
     reasons = [label for level, label in ((bleach_level, bleach_label), (mortality_level, mortality_label)) if level > 0]
-    condition = " + ".join(reasons) if reasons else "Stable"
+    if not has_coral:
+        condition = "Not assessable (No coral detected)"
+    else:
+        condition = " + ".join(reasons) if reasons else "Stable"
     if algae_cover > 30.0 and algae_cover > lcc:
         reasons.append("Algae-Covered Area Warning")
     if reasons:
@@ -202,7 +206,8 @@ def compute_health_indicators(counts: dict[str, int], total_valid: int) -> dict:
     algae_cover = pct(algae, reef_total)
 
     cat, cover_tier, condition, condition_cap = _reef_health_verdict(
-        lcc, bleaching_ratio, mortality_ratio, algae_cover, reef_total > 0
+        lcc, bleaching_ratio, mortality_ratio, algae_cover, reef_total > 0,
+        has_coral=total_coral > 0,
     )
 
     return {
@@ -522,14 +527,15 @@ class CoralPipeline:
             # Subtle neutral top border line
             cv2.line(overlay, (0, banner_y), (width, banner_y), (75, 75, 75), max(1, int(1.5 * fs)))
 
-            # Health verdict accent color
-            tier_text, _, reasons_text = health["reef_health_category"].partition(" [")
-            tier_lower = tier_text.lower()
-            if "excellent" in tier_lower or "good" in tier_lower:
+            # Coral condition is assessed only among detected coral; cover is
+            # reported separately as LCC.
+            condition_text = health.get("coral_condition") or "Not assessable"
+            condition_lower = condition_text.lower()
+            if condition_lower == "stable":
                 health_accent = (60, 200, 80)      # Emerald green
-            elif "fair" in tier_lower:
+            elif "warning" in condition_lower or "elevated" in condition_lower:
                 health_accent = (40, 180, 240)     # Golden amber
-            elif "poor" in tier_lower or "degraded" in tier_lower:
+            elif "alert" in condition_lower or "mortality" in condition_lower or "bleaching" in condition_lower:
                 health_accent = (50, 60, 230)      # Coral red
             else:
                 health_accent = (160, 160, 160)    # Slate
@@ -540,11 +546,10 @@ class CoralPipeline:
             margin = max(6 if small_banner else 12, int(width * 0.015))
             bar_w = width - (2 * margin)
 
-            # Row 1: Health Verdict & Telemetry
+            # Row 1: Coral condition & telemetry
             y1 = banner_y + int(row_h * 0.95)
-            cond_str = f" [{reasons_text.rstrip(']')}]" if reasons_text else ""
-            prefix = "REEF HEALTH: "
-            verdict = f"{tier_text}{cond_str}"
+            prefix = "CORAL CONDITION: "
+            verdict = condition_text
             metrics = f"  |  LCC: {health['live_coral_cover_pct']}%  |  Bleached: {health['bleached_coral_cover_pct']}%  |  Algae: {health['algae_covered_cover_pct']}%"
 
             conf_str = f"{mean_conf:.2f}" if mean_conf is not None else "n/a"
@@ -566,7 +571,7 @@ class CoralPipeline:
                     )
 
                 small_scale = min(0.36, fs * 0.82)
-                draw_fitted_line(f"REEF HEALTH: {tier_text}", y1, health_accent, small_scale)
+                draw_fitted_line(f"CORAL CONDITION: {condition_text}", y1, health_accent, small_scale)
                 draw_fitted_line(
                     f"LCC: {health['live_coral_cover_pct']}% | Bleached: {health['bleached_coral_cover_pct']}% | Algae: {health['algae_covered_cover_pct']}%",
                     y1 + row_h, (235, 235, 235), small_scale,
@@ -855,6 +860,7 @@ def aggregate_reports(reports: list[dict]) -> dict:
 
     mean_lcc = float(np.mean([r["health_indicators"]["live_coral_cover_pct"] for r in pool]))
     mean_bleached = float(np.mean([r["health_indicators"]["bleached_coral_cover_pct"] for r in pool]))
+    mean_total_coral = float(np.mean([r["health_indicators"]["total_coral_cover_pct"] for r in pool]))
     mean_algae = float(np.mean([
         r["health_indicators"].get("algae_covered_cover_pct", r["health_indicators"]["macroalgae_cover_pct"])
         for r in pool
@@ -863,7 +869,8 @@ def aggregate_reports(reports: list[dict]) -> dict:
     mean_mortality_ratio = float(np.mean([r["health_indicators"]["mortality_ratio_pct"] for r in pool]))
 
     overall_cat, overall_cover_tier, overall_condition, _ = _reef_health_verdict(
-        mean_lcc, mean_bleaching_ratio, mean_mortality_ratio, mean_algae, True
+        mean_lcc, mean_bleaching_ratio, mean_mortality_ratio, mean_algae, True,
+        has_coral=mean_total_coral > 0,
     )
 
     return {

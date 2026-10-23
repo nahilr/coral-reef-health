@@ -8,6 +8,7 @@ This phase targets coral-reef imagery generally. It uses CoralscapesV2 for visib
 
 ## Current decisions and implementation
 
+- [Full study guide](study-guide.md) - beginner-level concepts, dataset, model families, end-to-end pipeline, formulas, benchmark results, caveats, literature, demo commands, and presentation Q&A.
 - [Benthic Taxonomy Pipeline approach](btp-approach.md) - scope, system flow, dataset/model choices, trust contract, feasibility, and reproducibility requirements.
 - [Dataset inventory and plan](dataset-inventory.md) - local availability, contents, annotations, source links, and planned roles/constraints.
 - [Paper inventory](paper-inventory.md) - direct review of papers and presentation selections, with current-implementation fit and metric caveats.
