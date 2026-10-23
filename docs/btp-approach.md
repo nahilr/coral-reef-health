@@ -32,7 +32,7 @@ Image / video upload
 | Stage | Choice | Why |
 |---|---|---|
 | Quality gate | Laplacian blur score, exposure/contrast checks, color-cast flag | Cheap, explainable and protects the model from unusable frames. |
-| Segmentation backends | YOLO26n-sem, YOLO26s-sem, YOLO26n-seg, SegFormer-B5, and DINOv3-DPT using the shared 7-class project taxonomy | The benchmark compares all five backends on the same CoralscapesV2 test split; results are recorded in [`model_comparison.md`](../model_comparison.md). |
+| Segmentation backends | YOLO26n-sem, YOLO26s-sem, YOLO26m-sem, YOLO26n-seg, SegFormer-B5, and DINOv3-DPT using the shared 7-class project taxonomy | The benchmark compares all six backends on the same CoralscapesV2 test split; results are recorded in [`model_comparison.md`](../model_comparison.md). YOLO26m-sem is our current strongest fine-tuned YOLO checkpoint at 60.23% mIoU. |
 | Separate condition classifier | Not part of the consolidated workflow | The legacy V1 crop classifier was removed; visible condition labels are represented in the CoralscapesV2 segmentation taxonomy where explicitly annotated. |
 | Trust layer | Image-quality checks and backend-specific confidence or uncertainty signals, with an explicit review decision | Calibration and OOD detection are future evaluation work; do not report them as completed measurements. |
 
@@ -107,7 +107,7 @@ Use semantic segmentation for area/cover estimates. Detection boxes do not direc
 |---|---:|---|
 | Data and protocol | 1–2 | Dataset cards/rights, label map, grouped split manifest, reproducible environment. |
 | Audit and baseline | 3–7 | Data conversion/quality audit, class balance and visual checks, baseline segmentation and error analysis. |
-| Model comparison and validation | 8–10 | Evaluate the five implemented backends on the held-out CoralscapesV2 test split. |
+| Model comparison and validation | 8–10 | Evaluate the six implemented backends on the held-out CoralscapesV2 test split. |
 | Reliability and health indicators | 11–14 | Integrate image-quality checks, backend-specific signals, review flags, and supported condition indicators. |
 | Integration and report | 15–16 | Upload/report demo, packaging, final report and presentation. Weeks 17–18 are buffer. |
 

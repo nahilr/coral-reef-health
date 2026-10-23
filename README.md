@@ -2,7 +2,7 @@
 
 This project uses computer vision to estimate visible benthic cover and coral condition in underwater images and sampled ROV video. It checks image quality and model confidence, then reports a reef-health estimate and a review status.
 
-The project uses one **7-class taxonomy** and five model backends: YOLO26n-sem, YOLO26s-sem, YOLO26n-seg, SegFormer-B5, and DINOv3-DPT. Run them with the `main.py` command-line tool or the Streamlit app. The pipeline can also process sampled video frames.
+The project uses one **7-class taxonomy** and six model backends: YOLO26n-sem, YOLO26s-sem, YOLO26m-sem, YOLO26n-seg, SegFormer-B5, and DINOv3-DPT. Run them with the `main.py` command-line tool or the Streamlit app. The pipeline can also process sampled video frames.
 
 ---
 
@@ -81,6 +81,7 @@ pip install -r requirements.txt
 The fine-tuned YOLO checkpoints are tracked with Git LFS:
 - `models/checkpoints/yolo26n_sem/weights/best.pt` (3.4 MB)
 - `models/checkpoints/yolo26s_sem/weights/best.pt` (13.2 MB)
+- `models/checkpoints/yolo26m_sem/weights/best.pt` (28.9 MB)
 - `models/checkpoints/yolo26n_seg/weights/best.pt` (6.6 MB)
 
 To add another compatible YOLO checkpoint to the app, place its `.pt` file anywhere under `models/checkpoints/` (for example, `models/checkpoints/yolo26m_sem/weights/best.pt`). The app discovers `.pt` files there and reads the model name, task, class names, and saved training image size from the checkpoint. The checkpoint must use the project's 7-class taxonomy for reef-health outputs to be meaningful. Refresh or restart Streamlit after adding the file.
@@ -179,7 +180,7 @@ Launch the browser interface for visual pair-analysis:
 python main.py app --port 8501
 ```
 Open `http://localhost:8501` in your browser to:
-- Switch backends on the fly (YOLO26n-sem, YOLO26s-sem, YOLO26n-seg, SegFormer-B5, DINOv3-DPT).
+- Switch backends on the fly (YOLO26n-sem, YOLO26s-sem, YOLO26m-sem, YOLO26n-seg, SegFormer-B5, DINOv3-DPT).
 - Upload images or underwater videos with live on-the-fly inference playback, real-time telemetry, and downloadable annotated video streams.
 - Inspect the interactive benthic composition breakdown table and quality gate alerts.
 - Download structured JSON health reports and annotated video streams.
@@ -209,7 +210,7 @@ python main.py evaluate --model models/checkpoints/yolo26n_sem/weights/best.pt \
                         --manifest data/processed/yolo/manifest.csv \
                         --out reports/eval_metrics.json
 
-# Run the evaluator on the official 473-image test split (all five models)
+# Run the evaluator on the official 473-image test split (all six models)
 python scripts/evaluate_model_comparison.py
 ```
 
@@ -224,8 +225,9 @@ The repository provides standalone Kaggle training kernels under `kaggle/` that 
 kaggle kernels push -p kaggle/yolo26n_sem/
 kaggle kernels push -p kaggle/yolo26s_sem/
 kaggle kernels push -p kaggle/yolo26n_seg/
+kaggle kernels push -p kaggle/yolo26m_sem/
 ```
-Each kernel trains for 30–50 epochs on an NVIDIA T4 GPU and outputs `best.pt` along with full validation curves.
+The kernels train for 30–85 epochs on an NVIDIA T4 GPU and output `best.pt` along with validation curves and metrics.
 
 ---
 
@@ -297,6 +299,7 @@ python main.py app [-h] [--port PORT]
     │     Dense Semantic Models     │   │      Instance Models          │
     │  • YOLO26n-sem                │   │  • YOLO26n-seg                │
     │  • YOLO26s-sem                │   └───────────────┬───────────────┘
+    │  • YOLO26m-sem                │                   │
     │  • SegFormer-B5               │                   │
     │  • DINOv3 ViT-L + DPT         │                   │
     └───────────────┬───────────────┘                   │
@@ -495,6 +498,7 @@ All scores use the same 473-image Coralscapes test split and the project 7-class
 |---|---|---:|---:|
 | DINOv3 ViT-L + LoRA + DPT | Semantic | **72.65%** | **87.20%** |
 | SegFormer-B5 | Semantic | 67.87% | 85.36% |
+| YOLO26m-sem | Semantic | 60.23% | 81.13% |
 | YOLO26s-sem | Semantic | 57.98% | 79.97% |
 | YOLO26n-sem | Semantic | 51.94% | 75.64% |
 | YOLO26n-seg | Instance, rasterized for scoring | 41.04% | 52.32% |
@@ -526,17 +530,19 @@ Evaluations in `scripts/evaluate_model_comparison.py` adhere to strict reproduci
 ├── kaggle/
 │   ├── yolo26n_sem/                    # Kaggle kernel for YOLO26n-sem (30 epochs)
 │   ├── yolo26s_sem/                    # Kaggle kernel for YOLO26s-sem (50 epochs)
+│   ├── yolo26m_sem/                    # Kaggle kernel for YOLO26m-sem (85 epochs)
 │   ├── yolo26n_seg/                    # Kaggle kernel for YOLO26n-seg (instances)
 │   └── README.md                       # Kaggle execution notes
 ├── models/
 │   ├── checkpoints/
 │   │   ├── yolo26n_sem/weights/best.pt # Fine-tuned 7-class YOLO26n-sem (Git LFS)
 │   │   ├── yolo26s_sem/weights/best.pt # Fine-tuned 7-class YOLO26s-sem (Git LFS)
+│   │   ├── yolo26m_sem/weights/best.pt # Fine-tuned 7-class YOLO26m-sem (Git LFS)
 │   │   └── yolo26n_seg/weights/best.pt # Fine-tuned 7-class YOLO26n-seg (Git LFS)
 │   ├── pretrained/                     # SegFormer & DINOv3 backbones (via fetch_pretrained.py)
 │   └── model_comparison.json           # Machine-readable benchmark metrics
 ├── scripts/
-│   ├── evaluate_model_comparison.py    # Reproducible 5-backend evaluator
+│   ├── evaluate_model_comparison.py    # Reproducible 6-backend evaluator
 │   └── fetch_pretrained.py             # Downloader for public SegFormer & DINOv3 weights
 ├── src/
 │   ├── app/
@@ -599,7 +605,7 @@ Evaluations in `scripts/evaluate_model_comparison.py` adhere to strict reproduci
 | **Instance Segmentation (`seg`)** | Object Detection + Polygons | Predicts discrete bounding boxes and polygon masks per colony; ideal for colony counting and size profiling. |
 | **DINOv3 ViT-L + DPT** | Vision Foundation Model | Large vision transformer with Low-Rank Adaptation (LoRA) and Dense Prediction Transformer (DPT) head. |
 | **SegFormer-B5** | Hierarchical Transformer | Transformer architecture designed for dense semantic segmentation at high resolution. |
-| **YOLO26n-sem / YOLO26s-sem** | Real-Time Edge CNN | Ultralytics models for fast pixel classification on live ROV video. See the [benchmark report](model_comparison.md) for measured speed. |
+| **YOLO26n/s/m-sem** | Real-Time Edge CNN | Ultralytics models for pixel classification on live ROV video, with different size/speed trade-offs. See the [benchmark report](model_comparison.md) for measured speed. |
 
 ---
 

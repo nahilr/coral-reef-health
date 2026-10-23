@@ -1,7 +1,7 @@
 """Compare project YOLO checkpoints and released CoralscapesV2 dense models.
 
-Scores five backends on the same official test split and the same project
-taxonomy: YOLO26n-sem, YOLO26s-sem, YOLO26n-seg, the released SegFormer-B5
+Scores six backends on the same official test split and the same project
+taxonomy: YOLO26n-sem, YOLO26s-sem, YOLO26m-sem, YOLO26n-seg, the released SegFormer-B5
 (95-class) and the released DINOv3 ViT-L + LoRA + DPT (95-class).
 
 Run with the evaluation environment and a prepared CoralscapesV2 official test
@@ -43,6 +43,7 @@ from src.inference.dinov3_dpt import (  # noqa: E402
 TEST_ROOT = ROOT / "data/eval/coralscapesv2-test"
 YOLO_PATH = ROOT / "models/checkpoints/yolo26n_sem/weights/best.pt"
 YOLO_S_PATH = ROOT / "models/checkpoints/yolo26s_sem/weights/best.pt"
+YOLO_M_PATH = ROOT / "models/checkpoints/yolo26m_sem/weights/best.pt"
 YOLO_SEG_PATH = ROOT / "models/checkpoints/yolo26n_seg/weights/best.pt"
 SEGFORMER_PATH = ROOT / "models/pretrained/segformer-b5-coralscapesv2-95"
 DINOV3_PATH = ROOT / "models/pretrained/coralscapesv2-dinov3-vitl-lora-dpt-95_class"
@@ -56,10 +57,11 @@ PRED_IGNORE = N_CLASSES
 # never silently reuse predictions computed under a different taxonomy.
 YOLO_CACHE = TEST_ROOT / f"predictions/yolo26n_sem_{N_CLASSES}cls"
 YOLO_S_CACHE = TEST_ROOT / f"predictions/yolo26s_sem_{N_CLASSES}cls"
+YOLO_M_CACHE = TEST_ROOT / f"predictions/yolo26m_sem_{N_CLASSES}cls"
 YOLO_SEG_CACHE = TEST_ROOT / f"predictions/yolo26n_seg_{N_CLASSES}cls"
 SEGFORMER_CACHE = TEST_ROOT / f"predictions/segformer_b5_{N_CLASSES}cls"
 DINOV3_CACHE = TEST_ROOT / f"predictions/dinov3_vitl_dpt_{N_CLASSES}cls"
-MODEL_ORDER = ("yolo", "yolo_s", "yolo_seg", "segformer", "dinov3")
+MODEL_ORDER = ("yolo", "yolo_s", "yolo_m", "yolo_seg", "segformer", "dinov3")
 SEG_CONF = 0.25
 
 
@@ -186,6 +188,7 @@ def run_yolo(
         "inference_images_measured": inference_images,
         "inference_seconds_measured": inference_seconds,
         "seconds_per_image": inference_seconds / inference_images if inference_images else None,
+        "device": torch.cuda.get_device_name(0) if torch.cuda.is_available() else "CPU",
         **score_map(cm),
     }
 
@@ -399,6 +402,11 @@ def main() -> None:
         help=f"Comma-separated subset of {','.join(MODEL_ORDER)} (default: all)",
     )
     parser.add_argument(
+        "--out",
+        default=str(OUT),
+        help=f"Path for the JSON report (default: {OUT.relative_to(ROOT)})",
+    )
+    parser.add_argument(
         "--device",
         default=None,
         help="Torch device for the dense backends, e.g. cuda or cpu (default: auto)",
@@ -413,6 +421,8 @@ def main() -> None:
         raise FileNotFoundError(f"YOLO checkpoint is missing: {YOLO_PATH}")
     if "yolo_s" in wanted and not YOLO_S_PATH.is_file():
         raise FileNotFoundError(f"YOLO26s-sem checkpoint is missing: {YOLO_S_PATH}")
+    if "yolo_m" in wanted and not YOLO_M_PATH.is_file():
+        raise FileNotFoundError(f"YOLO26m-sem checkpoint is missing: {YOLO_M_PATH}")
     if "yolo_seg" in wanted and not YOLO_SEG_PATH.is_file():
         raise FileNotFoundError(f"YOLO-seg checkpoint is missing: {YOLO_SEG_PATH}")
     if "segformer" in wanted and not (SEGFORMER_PATH / "model.safetensors").is_file():
@@ -430,6 +440,9 @@ def main() -> None:
         "yolo_s": lambda: run_yolo(
             pairs, raw_to_project, YOLO_S_PATH, YOLO_S_CACHE, "Ultralytics YOLO26s-sem"
         ),
+        "yolo_m": lambda: run_yolo(
+            pairs, raw_to_project, YOLO_M_PATH, YOLO_M_CACHE, "Ultralytics YOLO26m-sem"
+        ),
         "yolo_seg": lambda: run_yolo_seg(pairs, raw_to_project),
         "segformer": lambda: run_segformer(pairs, raw_to_project),
         "dinov3": lambda: run_dinov3(pairs, raw_to_project, device_name=args.device),
@@ -445,9 +458,10 @@ def main() -> None:
         "metric_definition": "Pixel accuracy and macro IoU over valid GT pixels; predictions falling in void/ignored categories count as incorrect. Macro IoU averages classes with nonzero union.",
         "models": models,
     }
-    OUT.parent.mkdir(parents=True, exist_ok=True)
-    OUT.write_text(json.dumps(result, indent=2))
-    print(json.dumps({"report": str(OUT), "summary": [
+    output_path = Path(args.out).resolve()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(json.dumps(result, indent=2))
+    print(json.dumps({"report": str(output_path), "summary": [
         {"model": m["model"], "pixel_accuracy": m["pixel_accuracy"], "mean_iou": m["mean_iou"], "seconds_per_image": m["seconds_per_image"]}
         for m in result["models"]
     ]}, indent=2))

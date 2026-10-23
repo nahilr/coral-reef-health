@@ -123,6 +123,109 @@
       ]
     },
     {
+      "model": "Ultralytics YOLO26m-sem",
+      "checkpoint": "models/checkpoints/yolo26m_sem/weights/best.pt",
+      "images": 473,
+      "protocol": "One aspect-preserving Ultralytics inference pass per 2048x1024 image, imgsz=1024 (long side 1024), FP32. Dense 7-class semantic argmax; no confidence threshold.",
+      "inference_images_measured": 473,
+      "inference_seconds_measured": 52.66412970209785,
+      "seconds_per_image": 0.11134065476130624,
+      "pixel_accuracy": 0.8113310396871918,
+      "mean_iou": 0.6022669497888096,
+      "classes_in_miou": 7,
+      "per_class_iou": {
+        "coral_alive": 0.6809088581787214,
+        "coral_bleached": 0.5728580946503324,
+        "coral_dead": 0.27102825440223766,
+        "algae": 0.5203570925991343,
+        "hard_substrate": 0.6232641019589915,
+        "sand": 0.7291367988938832,
+        "non_reef": 0.818315447838367
+      },
+      "confusion_matrix": [
+        [
+          95740895,
+          306448,
+          2245991,
+          1404828,
+          4985731,
+          54957,
+          4892750,
+          0
+        ],
+        [
+          1995123,
+          7186357,
+          290664,
+          77888,
+          308306,
+          23404,
+          169585,
+          0
+        ],
+        [
+          5909180,
+          200404,
+          12045161,
+          1776598,
+          8205625,
+          13258,
+          1148478,
+          0
+        ],
+        [
+          6787531,
+          176756,
+          2753434,
+          58516978,
+          15865679,
+          406584,
+          6613889,
+          0
+        ],
+        [
+          6075334,
+          154498,
+          8302121,
+          13077247,
+          151346550,
+          4429899,
+          12219420,
+          0
+        ],
+        [
+          2393075,
+          1321733,
+          179056,
+          294955,
+          4674703,
+          69244070,
+          8731197,
+          0
+        ],
+        [
+          7815661,
+          333576,
+          1372485,
+          4703058,
+          13183809,
+          3200295,
+          289989365,
+          0
+        ]
+      ],
+      "device": "NVIDIA GeForce GTX 1650",
+      "training": {
+        "epochs_completed": 85,
+        "training_seconds": 37431.5,
+        "best_validation_epoch": 78,
+        "best_validation_miou": 0.55647,
+        "best_validation_pixel_accuracy": 0.8028,
+        "kaggle_test_mean_iou": 0.6016500983523445,
+        "kaggle_test_pixel_accuracy": 0.8106455522778668
+      }
+    },
+    {
       "model": "Ultralytics YOLO26n-sem",
       "checkpoint": "models/checkpoints/yolo26n_sem/weights/best.pt",
       "images": 473,

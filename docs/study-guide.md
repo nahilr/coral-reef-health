@@ -106,7 +106,7 @@ Other metrics in this project:
 
 ### CoralscapesV2
 
-The current training and five-model benchmark use **CoralscapesV2**, a dataset of 2,433 densely annotated reef images with 95 fine-grained labels and official train/validation/test splits. The project benchmark uses 473 official test images at 2048 × 1024 pixels. Training scripts stream the dataset from Hugging Face on Kaggle; the full V2 training corpus is not required to be stored locally for those runs.
+The current training and six-model benchmark use **CoralscapesV2**, a dataset of 2,433 densely annotated reef images with 95 fine-grained labels and official train/validation/test splits. The project benchmark uses 473 official test images at 2048 × 1024 pixels. Training scripts stream the dataset from Hugging Face on Kaggle; the full V2 training corpus is not required to be stored locally for those runs.
 
 The dataset’s original 95 labels include coral forms/condition states and other benthic or scene categories. The project merges these into a stable 7-class vocabulary. This reduces task complexity and produces meaningful cover categories, but it loses species/genus and morphology detail. Label merging changes the task and can change apparent metric scores.
 
@@ -136,7 +136,7 @@ This is a conversion from dense semantic masks to polygon objects. Thin or tiny 
 
 ## 5. Models in this project
 
-The five backends share a common evaluation taxonomy and output interface, but differ in architecture, capacity, training origin, speed, and output type.
+The six backends share a common evaluation taxonomy and output interface, but differ in architecture, capacity, training origin, speed, and output type.
 
 ### YOLO26n-sem and YOLO26s-sem
 
@@ -144,6 +144,12 @@ These are Ultralytics YOLO26 **semantic segmentation** models fine-tuned for the
 
 - YOLO26n-sem: 30 epochs, 1024-pixel training size, batch 4; compact checkpoint (~3.4 MB), fastest among benchmarked semantic models.
 - YOLO26s-sem: 50 epochs, 1024-pixel training size, batch 4; larger checkpoint (~13.2 MB) and better benchmark scores than the nano variant.
+
+### YOLO26m-sem
+
+- Fine-tuned by the project for 85 epochs at 1024 pixels and batch 4 (with patience 30); checkpoint is about 28.9 MB.
+- Reaches 60.23% mIoU and 81.13% pixel accuracy on the local replay of the 473-image official test split. The Kaggle evaluation on JPEG-converted images reports 60.17% and 81.06%.
+- Runs at about 0.111 seconds per image (~9 FPS) on the local GTX 1650 benchmark. It is more accurate than YOLO26s-sem, with higher inference time.
 
 Training runs were performed on Kaggle GPUs. Inference speed numbers in the report were measured on an NVIDIA GTX 1650 and exclude model-loading time; do not generalize that speed to every device.
 
@@ -168,7 +174,7 @@ This backend combines three ideas:
 
 The project uses an EPFL-ECEO CoralscapesV2 95-class checkpoint. Its loader reconstructs the DINOv3 encoder configuration from checkpoint tensor shapes, so it can load without downloading the gated base encoder. The weights are much larger (~1.33 GB), and inference is slower than YOLO, but this backend scored highest in the project’s test comparison.
 
-### Why five models?
+### Why six models?
 
 The comparison illustrates an accuracy/compute trade-off and tests distinct design choices: small real-time semantic models, a larger semantic YOLO, an instance-segmentation model, a hierarchical transformer, and a large pretrained vision transformer with a dense decoder. It does not prove one architecture is universally best. The best deployment choice depends on the purpose: quick edge inference, cover accuracy, available GPU memory, or expert-review workflow.
 
@@ -180,7 +186,7 @@ The comparison illustrates an accuracy/compute trade-off and tests distinct desi
 2. Map fine-grained source labels to the seven project categories.
 3. For YOLO training, convert class masks to polygon labels and configure the train/validation/test folders.
 4. Train YOLO checkpoints on Kaggle. SegFormer-B5 and DINOv3-DPT are author-provided CoralscapesV2 checkpoints rather than models trained in the project’s Kaggle runs.
-5. Run all five backends on the same 473-image official test split.
+5. Run all six backends on the same 473-image official test split.
 6. Map model predictions into the project labels and compute pixel accuracy, per-class IoU, macro mIoU, and derived cover-indicator agreement.
 
 ### Single image inference
@@ -238,16 +244,53 @@ Existing JSON reports and rendered overlays in `data/processed` are saved output
 
 ## 8. Reliability and human review
 
-The project attempts to make uncertainty visible through three kinds of signals:
+The gate combines **input quality** and **prediction reliability** signals. It runs after model inference, so it does not stop a prediction from being generated; it marks the report for human review.
 
-1. **Input quality:** blur, exposure, contrast, color cast, unreadable input.
-2. **Prediction confidence:** mean maximum pixel probability for dense models, or detection confidence for instance predictions when available.
-3. **Prediction uncertainty:** normalized entropy of class probabilities for dense backends, or entropy derived from detection confidence for the instance backend.
-4. **Coverage:** fraction of the image predicted as benthic/reef classes, excluding `non_reef`.
+### Image-quality checks
 
-The review gate returns `accepted` or `needs_review` and records reasons. Thresholds differ by backend; transformer defaults are stricter in the pipeline. If a backend does not expose confidence/uncertainty, the code skips that check instead of fabricating a value.
+`src/data/quality.py` converts the image to grayscale and computes Laplacian variance, grayscale brightness mean, and grayscale standard deviation. It also compares the means of the three color channels.
 
-This is **a heuristic review gate, not a validated out-of-distribution detector or guarantee of correctness**. A model can be confidently wrong. A proper calibration study needs held-out probability/correctness analysis; an OOD study needs known in-distribution and shifted data with suitable metrics. The review flag is a cue to inspect outputs, not a certification.
+| Signal | Calculation | Flag condition |
+|---|---|---|
+| Blur | Variance of the grayscale Laplacian (edge/detail response) | Score **< 12** |
+| Exposure | Mean grayscale value on the 0–255 scale | Mean **< 25** or **> 235** |
+| Contrast | Standard deviation of grayscale pixel values | **< 18** |
+| Color cast | Largest mean channel value divided by smallest mean channel value | Ratio **> 2.2** |
+| Readability | Whether the image can be loaded and contains pixels | Unreadable/empty input |
+
+The displayed `quality_score` begins at 1.0 and subtracts 0.35 for blur, 0.25 for exposure, and 0.20 each for low contrast and color cast, with a floor at zero. **The decision gate does not threshold `quality_score`; it checks the flags. Any one flag makes the image `needs_review`.** These are inexpensive image-quality heuristics, not universal standards for underwater imagery.
+
+### Prediction and coverage checks
+
+| Signal | How the pipeline calculates it |
+|---|---|
+| Mean confidence | For dense models, average the largest class probability over recognized pixels. For instance predictions, use detection scores in the filled mask pixels when detections exist. |
+| Dense-model uncertainty | Per pixel, compute Shannon entropy `H = -Σ pᵢ log(pᵢ)`, then normalize by `log(K)` where `K` is the number of probability groups; average over recognized pixels. It is 0 when the model strongly favors one class and approaches 1 when probabilities are spread evenly. |
+| Instance-model uncertainty | Convert each detection score `s` into binary entropy `-[s log₂(s) + (1-s) log₂(1-s)]`, then average over detections. No detections gives uncertainty 1. |
+| Reef coverage | `(recognized pixels - predicted non_reef pixels) / all image pixels`. This is the predicted benthic/reef share of the frame. |
+
+For semantic YOLO, the project retains the model logits before the class-map argmax so it can calculate probabilities and entropy. If the model output does not expose confidence or uncertainty, that check is skipped (`None` is recorded); the code does not invent a value. Coverage remains checked.
+
+### Thresholds currently used by the code
+
+| Backend/configuration | Minimum mean confidence | Minimum reef coverage | Maximum uncertainty |
+|---|---:|---:|---:|
+| General defaults (including current YOLO fallback) | 0.22 | 0.05 (5% of image) | 0.90 |
+| SegFormer-B5 and DINOv3-DPT defaults | 0.70 | 0.05 (5% of image) | 0.40 |
+
+The gate flags low confidence when `confidence < minimum`, low coverage when `coverage < minimum`, and high uncertainty when `uncertainty > maximum`. Therefore exact equality passes those individual checks. Any image-quality flag or reliability flag produces `needs_review`; no flags produces `accepted`. Thresholds can also be passed or loaded from a calibration artifact.
+
+The image JSON stores this under `reliability`: `status`, combined `reasons`, separate `quality_flags` and `reliability_flags`, the effective `thresholds`, and booleans showing whether confidence and uncertainty were available. The related implementation lives in `src/data/quality.py`, `src/trust/reliability.py`, and `src/inference/pipeline.py`.
+
+### Calibration behavior and current artifact status
+
+`scripts/calibrate_yolo_sem_reliability.py` is designed to fit a single temperature on sampled validation pixels by minimizing cross-entropy (negative log likelihood). Dividing logits by temperature changes probability sharpness without changing the model weights. It then searches image-level confidence/uncertainty cutoffs to maximize accepted validation examples while constraining acceptance of validation images whose pixel accuracy is below 70%: at most 5% of those low-accuracy images may be accepted. The output also records 15-bin pixel ECE before/after temperature scaling and fixes coverage at 5%.
+
+The runtime looks for `reliability_calibration.json` beside a YOLO checkpoint directory. If found and no thresholds are supplied explicitly, its temperature and thresholds replace the YOLO fallback values. **No such calibration JSON is present in the currently checked model folders**, so current runs use temperature 1.0 and the general defaults (0.22 / 0.05 / 0.90). SegFormer and DINOv3 use their stricter defaults. The calibration script’s existence is not evidence that calibration has been run or validated on a new reef/camera.
+
+For video, the pipeline calculates a review decision per sampled frame. Survey aggregation averages accepted frames if at least one frame is accepted; if none are accepted, it still summarizes all sampled frames but marks the survey `needs_review`.
+
+This is **a heuristic human-review gate, not a validated out-of-distribution detector or guarantee of correctness**. A model can be confidently wrong. Calibration needs probability/correctness analysis on separate data; OOD detection needs known in-distribution and shifted inputs with suitable metrics. The review flag is a cue to inspect the report and image, not a certification.
 
 ## 9. Benchmark results and how to explain them
 
@@ -257,11 +300,12 @@ All reported models were evaluated on 473 official CoralscapesV2 test images usi
 |---|---|---:|---:|---:|
 | DINOv3 ViT-L + LoRA + DPT | Semantic | **72.65%** | **87.20%** | 3.58 s |
 | SegFormer-B5 | Semantic | 67.87% | 85.36% | 1.30 s |
+| YOLO26m-sem | Semantic | 60.23% | 81.13% | 0.111 s |
 | YOLO26s-sem | Semantic | 57.98% | 79.97% | 0.038 s |
 | YOLO26n-sem | Semantic | 51.94% | 75.64% | 0.026 s |
 | YOLO26n-seg | Instance, rasterized to dense map | 41.04% | 52.32% | 0.032 s |
 
-YOLO timing was measured on an NVIDIA GTX 1650 and excludes model loading. Transformer timing also comes from a dedicated evaluation pass; hardware/timing differences mean these are approximate project measurements, not a hardware-independent speed ranking. DINOv3 is the most accurate in this comparison but much larger/slower. YOLO26n-sem is much smaller and faster. YOLO26s-sem improves accuracy over nano while remaining compact.
+YOLO timing was measured on an NVIDIA GTX 1650 and excludes model loading. Transformer timing also comes from a dedicated evaluation pass; hardware/timing differences mean these are approximate project measurements, not a hardware-independent speed ranking. DINOv3 is the most accurate in this comparison but much larger/slower. YOLO26n-sem is much smaller and faster. YOLO26m-sem is the strongest fine-tuned YOLO model in this comparison; the 13.2 MB YOLO26s-sem is a smaller, faster option.
 
 ### Per-class story
 
@@ -312,12 +356,12 @@ The key research gap is not simply “get a larger model.” A deployable ecolog
 ### Implemented in the current code
 
 - Seven-class label mapping and dense semantic inference.
-- YOLO26n/s semantic and YOLO26n instance models, plus SegFormer-B5 and DINOv3-DPT backends.
+- YOLO26n/s/m semantic and YOLO26n instance models, plus SegFormer-B5 and DINOv3-DPT backends.
 - Image quality heuristics, confidence/entropy signals where available, and an accepted/needs-review gate.
 - Pixel composition and derived visible-cover/condition indicators.
 - Image overlay and JSON report.
 - Video frame subsampling, per-frame inference, annotated MP4, and frame-level aggregation.
-- Five-model evaluation on the 473-image official CoralscapesV2 test split.
+- Six-model evaluation on the 473-image official CoralscapesV2 test split.
 
 ### Not implemented or not validated as a project claim
 
@@ -331,13 +375,13 @@ The key research gap is not simply “get a larger model.” A deployable ecolog
 
 ### 30-second version
 
-“We built an AI-assisted coral-reef image analysis pipeline. It takes an underwater photo or sampled video, checks basic image quality, and uses semantic segmentation to label each pixel as live, bleached, or dead coral, algae, hard substrate, sand, or non-reef scene content. We convert those labels into visible-cover indicators and flag uncertain or poor-quality results for human review. On the 473-image CoralscapesV2 test split, DINOv3-DPT reached 72.65% macro mIoU, while the much smaller YOLO26n-sem reached 51.94% and was far faster. These are benchmark results, not validation on every reef.”
+"We built an AI-assisted coral-reef image analysis pipeline. It takes an underwater photo or sampled video, checks basic image quality, and uses semantic segmentation to label each pixel as live, bleached, or dead coral, algae, hard substrate, sand, or non-reef scene content. We convert those labels into visible-cover indicators and flag uncertain or poor-quality results for human review. On the 473-image CoralscapesV2 test split, DINOv3-DPT reached 72.65% macro mIoU, while our fine-tuned YOLO26m-sem reached 60.23%. These are benchmark results, not validation on every reef."
 
 ### 2-minute version
 
 “Manual reef surveys are valuable but annotating large collections of underwater imagery takes time. Our prototype automates part of that workflow. The model predicts a category for every pixel, not just a label for the whole image. We use CoralscapesV2, which has 95 detailed labels, and map those labels into seven broad classes so the outputs can support cover summaries. Non-reef scene pixels such as water and equipment are excluded from the benthic denominator.
 
-“We compare five models: small and larger YOLO semantic segmenters, a YOLO instance segmenter, SegFormer-B5, and DINOv3 with a DPT decoder. Dense semantic predictions are the natural fit for area cover. Instance masks are useful for object-shaped detections, but our instance labels were generated from semantic regions, not expert colony identities. In the shared 473-image test benchmark, DINOv3 has the highest score at 72.65% mIoU; YOLO26n-sem is much faster and smaller at 51.94% mIoU. Dead coral is still difficult, and the benchmark does not establish performance on another geography or camera.
+“We compare six models: three fine-tuned YOLO semantic segmenters, a YOLO instance segmenter, SegFormer-B5, and DINOv3 with a DPT decoder. Dense semantic predictions are the natural fit for area cover. Instance masks are useful for object-shaped detections, but our instance labels were generated from semantic regions, not expert colony identities. In the shared 473-image test benchmark, DINOv3 has the highest score at 72.65% mIoU; our YOLO26m-sem reaches 60.23% mIoU and runs at about 9 FPS on a GTX 1650. Dead coral is still difficult, and the benchmark does not establish performance on another geography or camera.
 
 “After segmentation we count pixels, calculate live coral cover, bleaching and mortality ratios, and attach simple quality and uncertainty flags. We use these as review cues. The software samples video frames and averages frame summaries, but it does not track colonies or measure temporal change. The next scientific step is expert and local validation, plus tests on held-out sites and cameras.”
 
