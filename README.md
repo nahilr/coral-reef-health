@@ -149,7 +149,23 @@ python main.py infer --video underwater_transect.mp4 --every-n 2 --out outputs/v
 ```
 **Outputs generated in `outputs/video_run/`**:
 - `annotated_survey.mp4`: Compressed H.264 video with real-time bottom banner telemetry rendered on every processed frame.
-- `report.json`: Survey-wide aggregated metrics (mean LCC, mean bleaching ratio, acceptance rate, and overall health tier).
+- `report.json`: Survey-wide aggregated metrics (mean LCC, mean bleaching ratio, acceptance rate, and overall health tier), with per-frame details.
+
+#### C. Batch inference from a folder
+Use `--dir` to recursively process supported images and videos in one folder. The model is loaded once for the batch. Annotated media, per-file JSON reports, and the batch manifest are written into the folder passed to `--out`, preserving any nested input subfolders.
+
+```bash
+python main.py infer \
+  --dir path/to/small-test-folder \
+  --out outputs/batch_run \
+  --model models/checkpoints/yolo26s_sem/weights/best.pt \
+  --model-type yolo \
+  --imgsz 1024 \
+  --conf 0.20 \
+  --every-n 1
+```
+
+The folder scan supports `.jpg`, `.jpeg`, `.png`, `.bmp`, `.tif`, `.tiff`, `.mp4`, `.avi`, `.mov`, and `.mkv` files. A flat input folder produces annotated image overlays, videos, per-file JSON reports, and `manifest.json` directly in `outputs/batch_run/`. `--every-n` controls video frame sampling; `1` processes every frame. To smoke-test the batch workflow, pass a small folder containing only a few images or one short video.
 
 ---
 
@@ -230,7 +246,7 @@ python tests/run_all.py
 ### 1. Inference (`infer`)
 ```bash
 python main.py infer [-h] [--model MODEL] [--model-type {yolo,segformer,dinov3}]
-                     [--image IMAGE] [--video VIDEO] [--out OUT]
+                     [--image IMAGE] [--video VIDEO] [--dir INPUT_DIR] [--out OUT]
                      [--imgsz IMGSZ] [--conf CONF] [--every-n EVERY_N]
                      [--max-frames MAX_FRAMES] [--save-frames]
                      [--output-video-name OUTPUT_VIDEO_NAME]

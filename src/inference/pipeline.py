@@ -746,7 +746,8 @@ class CoralPipeline:
                     output_video_name: str = "annotated_survey.mp4",
                     every_n: int = 1, max_frames: int | None = None,
                     save_frames: bool = False,
-                    progress_callback: VideoProgressCallback | None = None) -> dict:
+                    progress_callback: VideoProgressCallback | None = None,
+                    report_path: str | Path | None = None) -> dict:
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
         cap = cv2.VideoCapture(str(video_path))
@@ -832,7 +833,9 @@ class CoralPipeline:
             "summary": summary,
             "frames": reports,
         }
-        (output_dir / "report.json").write_text(json.dumps(result, indent=2))
+        report_file = Path(report_path) if report_path else output_dir / "report.json"
+        report_file.parent.mkdir(parents=True, exist_ok=True)
+        report_file.write_text(json.dumps(result, indent=2))
         return result
 
 

@@ -43,7 +43,10 @@ def main() -> None:
     inf.add_argument("--model-type", choices=["yolo", "segformer", "dinov3"], default="yolo")
     inf.add_argument("--image")
     inf.add_argument("--video")
-    inf.add_argument("--out", default="outputs/inference")
+    inf.add_argument("--dir", dest="input_dir",
+                     help="Infer supported images/videos from this input folder recursively")
+    inf.add_argument("--out", default="outputs/inference",
+                     help="Output folder for annotated media, JSON reports, and batch manifest")
     inf.add_argument("--imgsz", type=int, default=512)
     inf.add_argument("--conf", type=float, default=0.20)
     inf.add_argument("--every-n", type=int, default=1, help="Process every N-th frame (default: 1)")
@@ -64,13 +67,96 @@ def main() -> None:
         print(json.dumps(evaluate(args.model, args.manifest, args.raw_classes,
                                   max_images=args.max_images, conf=args.conf, imgsz=args.imgsz, out=args.out), indent=2))
     elif args.cmd == "infer":
-        if not args.image and not args.video:
-            p.error("Must specify either --image or --video")
+        provided_inputs = sum(bool(value) for value in (args.image, args.video, args.input_dir))
+        if provided_inputs != 1:
+            p.error("Specify exactly one of --image, --video, or --dir")
         from src.inference.pipeline import CoralPipeline
         pipeline = CoralPipeline(args.model, imgsz=args.imgsz, conf=args.conf, model_type=args.model_type)
         out = Path(args.out)
         out.mkdir(parents=True, exist_ok=True)
-        if args.image:
+        if args.input_dir:
+            input_dir = Path(args.input_dir)
+            if not input_dir.is_dir():
+                p.error(f"Input folder does not exist or is not a directory: {input_dir}")
+            image_exts = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff"}
+            video_exts = {".mp4", ".avi", ".mov", ".mkv"}
+            files = sorted(
+                path for path in input_dir.rglob("*")
+                if path.is_file() and path.suffix.lower() in image_exts | video_exts
+            )
+            if not files:
+                p.error(f"No supported image or video files found under: {input_dir}")
+
+            entries = []
+            for index, source in enumerate(files, start=1):
+                relative = source.relative_to(input_dir)
+                kind = "images" if source.suffix.lower() in image_exts else "videos"
+                overlay_dir = out / relative.parent
+                overlay_dir.mkdir(parents=True, exist_ok=True)
+                report_dir = out / relative.parent
+                report_dir.mkdir(parents=True, exist_ok=True)
+                report_path = report_dir / f"{source.name}.json"
+                print(f"[{index}/{len(files)}] {kind[:-1]}: {relative}", flush=True)
+                try:
+                    if kind == "images":
+                        overlay_path = overlay_dir / f"{source.name}.overlay.jpg"
+                        report = pipeline.infer(source, overlay_path)
+                        report_path.write_text(json.dumps(report, indent=2))
+                        entry = {
+                            "input": str(source),
+                            "type": "image",
+                            "overlay": str(overlay_path),
+                            "report": str(report_path),
+                            "status": "complete",
+                        }
+                    else:
+                        video_name = f"{source.stem}_annotated.mp4"
+                        report = pipeline.infer_video(
+                            source, overlay_dir,
+                            output_video_name=video_name,
+                            every_n=args.every_n,
+                            max_frames=args.max_frames,
+                            save_frames=args.save_frames,
+                            report_path=report_path,
+                        )
+                        entry = {
+                            "input": str(source),
+                            "type": "video",
+                            "annotated_video": report.get("annotated_video"),
+                            "report": str(report_path),
+                            "processed_frames": report.get("sampled_frames", 0),
+                            "status": "complete",
+                        }
+                    entries.append(entry)
+                    print(f"    complete: {entry.get('overlay') or entry.get('annotated_video')}", flush=True)
+                except Exception as exc:
+                    entry = {
+                        "input": str(source),
+                        "type": "image" if kind == "images" else "video",
+                        "status": "error",
+                        "error": str(exc),
+                    }
+                    entries.append(entry)
+                    print(f"    ERROR: {exc}", file=sys.stderr, flush=True)
+
+            manifest = {
+                "input_dir": str(input_dir),
+                "output_dir": str(out),
+                "model": args.model,
+                "model_type": args.model_type,
+                "imgsz": args.imgsz,
+                "conf": args.conf,
+                "every_n": args.every_n,
+                "max_frames": args.max_frames,
+                "processed": sum(entry["status"] == "complete" for entry in entries),
+                "failed": sum(entry["status"] == "error" for entry in entries),
+                "files": entries,
+            }
+            manifest_path = out / "manifest.json"
+            manifest_path.write_text(json.dumps(manifest, indent=2))
+            print(f"Processed {manifest['processed']} of {len(entries)} files; {manifest['failed']} failed.")
+            print(f"Batch manifest: {manifest_path}")
+        elif args.image:
             report = pipeline.infer(args.image, out / "overlay.jpg")
             (out / "report.json").write_text(json.dumps(report, indent=2))
         else:
@@ -78,10 +164,12 @@ def main() -> None:
                                           output_video_name=args.output_video_name,
                                           every_n=args.every_n,
                                           max_frames=args.max_frames,
-                                          save_frames=args.save_frames)
+                                          save_frames=args.save_frames,
+                                          report_path=out / "report.json")
             if report.get("annotated_video"):
                 print(f"Annotated video saved to: {report['annotated_video']}")
-        print(json.dumps(report, indent=2))
+        if not args.input_dir:
+            print(json.dumps(report, indent=2))
     elif args.cmd == "app":
         cmd = [sys.executable, "-m", "streamlit", "run", "src/app/streamlit_app.py", "--server.port", str(args.port)]
         try:
